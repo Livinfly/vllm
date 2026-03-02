@@ -37,6 +37,7 @@ from vllm.v1.metrics.reader import Metric, get_metrics_snapshot
 from vllm.v1.metrics.stats import IterationStats
 from vllm.v1.utils import record_function_or_nullcontext
 from vllm.v1.worker.worker_base import WorkerBase
+from vllm.v1.attention.dsa.utils import create_dsa_config_from_args, set_dsa_config
 
 logger = init_logger(__name__)
 
@@ -62,6 +63,10 @@ class LLMEngine:
         self.observability_config = vllm_config.observability_config
         self.model_config = vllm_config.model_config
         self.cache_config = vllm_config.cache_config
+        # TODO: refactor
+        self.dsa_config = create_dsa_config_from_args(self.vllm_config)
+        set_dsa_config(self.dsa_config)
+        # TODO: self.dsa_config = vllm_config.dsa_config
 
         self.log_stats = log_stats
 

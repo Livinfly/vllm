@@ -4,7 +4,7 @@
 
 import copy
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 import numpy as np
 import torch
@@ -51,6 +51,7 @@ from vllm.v1.attention.backends.utils import (
     get_kv_cache_layout,
 )
 from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.attention.dsa.attention_adaptor import AttentionAdaptor, FlashAttentionAdaptor
 
 logger = init_logger(__name__)
 
@@ -100,6 +101,10 @@ class FlashAttentionBackend(AttentionBackend):
     @staticmethod
     def get_builder_cls() -> type["FlashAttentionMetadataBuilder"]:
         return FlashAttentionMetadataBuilder
+
+    @staticmethod
+    def get_adaptor_cls() -> type["FlashAttentionAdaptor"]:
+        return FlashAttentionAdaptor
 
     @staticmethod
     def get_kv_cache_shape(
@@ -585,6 +590,7 @@ class FlashAttentionImpl(AttentionImpl):
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: FlashAttentionMetadata,
+        adaptor: Optional[AttentionAdaptor] = None,
         output: torch.Tensor | None = None,
         output_scale: torch.Tensor | None = None,
         output_block_scale: torch.Tensor | None = None,
@@ -681,6 +687,29 @@ class FlashAttentionImpl(AttentionImpl):
             key_cache = key_cache.view(dtype)
             value_cache = value_cache.view(dtype)
 
+        # TODO: kvcache selection before attention
+        # 保存原始数据用于验证
+        original_key_cache = key_cache
+        original_value_cache = value_cache
+        original_attn_metadata = attn_metadata
+        select_result = None
+
+        if adaptor is not None:
+            print(f"DDSA: {__name__}, attn_adaptor.pre_forward start", flush=True)
+            selected_key_cache, selected_value_cache, adapted_metadata, select_result = \
+                adaptor.pre_forward(
+                    query,
+                    key_cache,
+                    value_cache,
+                    attn_metadata
+                )
+            print(f"DDSA: {__name__}, attn_adaptor.pre_forward end", flush=True)
+            # 使用选择后的 kv cache 和 adapted metadata
+            if select_result is not None:
+                key_cache = selected_key_cache
+                value_cache = selected_value_cache
+                attn_metadata = adapted_metadata
+
         if not attn_metadata.use_cascade:
             cu_seqlens_q = attn_metadata.query_start_loc
             seqused_k = attn_metadata.seq_lens
@@ -704,6 +733,9 @@ class FlashAttentionImpl(AttentionImpl):
                     k_descale=layer._k_scale.expand(descale_shape),
                     v_descale=layer._v_scale.expand(descale_shape),
                 )
+                # recover metadata
+                if adaptor is not None:
+                    attn_metadata = adaptor.post_forward(attn_metadata)
                 return output
             else:
                 sliding_window_size = (
@@ -734,6 +766,31 @@ class FlashAttentionImpl(AttentionImpl):
                     num_splits=attn_metadata.max_num_splits,
                     s_aux=self.sinks,
                 )
+
+                # 验证：当启用DSA时，验证结果的正确性
+                if select_result is not None and adaptor is not None:
+                    # 从 adaptor 获取 DSAConfig
+                    dsa_config = getattr(adaptor, 'dsa_config', None)
+                    if dsa_config is not None and dsa_config.verify_enabled:
+                        from vllm.v1.attention.dsa.verify import verify_attention_equivalence
+                        print("DDSA Verify: Starting verification...", flush=True)
+                        verify_attention_equivalence(
+                            query=query[:num_actual_tokens],
+                            key_cache=original_key_cache,
+                            value_cache=original_value_cache,
+                            block_table=original_attn_metadata.block_table,
+                            seq_lens=original_attn_metadata.seq_lens,
+                            query_start_loc=original_attn_metadata.query_start_loc,
+                            selected_block_table=attn_metadata.block_table,
+                            selected_seq_lens=attn_metadata.seq_lens,
+                            output_from_flash_attn=output[:num_actual_tokens],
+                            block_size=dsa_config.block_size,
+                            scale=self.scale,
+                        )
+
+                # recover metadata
+                if adaptor is not None:
+                    attn_metadata = adaptor.post_forward(attn_metadata)
                 return output
 
         # Cascade attention (rare case).
@@ -763,6 +820,9 @@ class FlashAttentionImpl(AttentionImpl):
             v_descale=layer._v_scale,
             s_aux=self.sinks,
         )
+        # recover metadata
+        if adaptor is not None:
+            attn_metadata = adaptor.post_forward(attn_metadata)
         return output
 
     def _forward_with_dcp(

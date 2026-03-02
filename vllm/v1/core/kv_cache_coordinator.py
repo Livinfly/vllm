@@ -513,6 +513,11 @@ class HybridKVCacheCoordinator(KVCacheCoordinator):
         ), hit_length
 
 
+# TODO: KVCacheCoordinator for DDSA
+class DDSAKVCacheCoordinator(KVCacheCoordinator):
+    pass
+
+
 def get_kv_cache_coordinator(
     kv_cache_config: KVCacheConfig,
     max_model_len: int,

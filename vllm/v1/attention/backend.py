@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from typing import Optional
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -18,6 +19,7 @@ if TYPE_CHECKING:
     from vllm.platforms.interface import DeviceCapability
     from vllm.v1.attention.backends.utils import KVCacheLayoutType
     from vllm.v1.kv_cache_interface import AttentionSpec
+    from vllm.v1.attention.dsa.attention_adaptor import AttentionAdaptor
 
 
 class AttentionType(str, Enum):
@@ -70,6 +72,12 @@ class AttentionBackend(ABC):
     @staticmethod
     @abstractmethod
     def get_builder_cls():  # -> Type["AttentionMetadataBuilder"]:
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def get_adaptor_cls() -> type["AttentionAdaptor"]:
+        # TODO: overwrite to support more backends
         raise NotImplementedError
 
     @staticmethod
@@ -683,6 +691,7 @@ class AttentionImpl(ABC, Generic[T]):
         value: torch.Tensor,
         kv_cache: torch.Tensor,
         attn_metadata: T,
+        adaptor: Optional["AttentionAdaptor"] = None,
         output: torch.Tensor | None = None,
         output_scale: torch.Tensor | None = None,
         output_block_scale: torch.Tensor | None = None,

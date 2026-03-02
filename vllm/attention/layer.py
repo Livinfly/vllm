@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Attention layer."""
 
-from typing import cast
+from typing import cast, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -43,6 +43,7 @@ from vllm.v1.kv_cache_interface import (
     MLAAttentionSpec,
     SlidingWindowSpec,
 )
+from vllm.v1.attention.dsa.attention_adaptor import AttentionAdaptor
 
 logger = init_logger(__name__)
 
@@ -286,6 +287,13 @@ class Attention(nn.Module, AttentionLayerBase):
             kv_sharing_target_layer_name,
             **extra_impl_args,
         )
+        adaptor_cls = self.attn_backend.get_adaptor_cls()
+        # TODO: adaptor args
+        self.adaptor = adaptor_cls()
+        if not self.adaptor.dsa_config.dsa_enabled:
+            self.adaptor = None
+        print(f"DDSA: {__name__}, attn_adaptor: {self.adaptor}", flush=True)
+
         self.backend = AttentionBackendEnum[self.attn_backend.get_name()]
         self.dtype = dtype
 
@@ -365,6 +373,10 @@ class Attention(nn.Module, AttentionLayerBase):
             if self.impl.supports_quant_query_input:
                 query, _ = self.query_quant(query, self._q_scale)
 
+        # TODO: pre_attention, args
+        # self.adaptor.pre_attention()
+        print(f"DDSA: {__name__}, attn_adaptor.pre_attention, no impl", flush=True)
+
         if self.use_output:
             if output_shape is None:
                 # Handle both 2D [num_tokens, hidden] and
@@ -391,9 +403,11 @@ class Attention(nn.Module, AttentionLayerBase):
                     attn_metadata = attn_metadata[self.layer_name]
                 self_kv_cache = self.kv_cache[forward_context.virtual_engine]
                 self.impl.forward(
-                    self, query, key, value, self_kv_cache, attn_metadata, output=output
+                    self, query, key, value, self_kv_cache, attn_metadata, adaptor=self.adaptor, output=output
                 )
             else:
+                forward_context = get_forward_context()
+                forward_context.additional_kwargs['adaptor'] = self.adaptor
                 torch.ops.vllm.unified_attention_with_output(
                     query, key, value, output, self.layer_name
                 )
@@ -406,9 +420,11 @@ class Attention(nn.Module, AttentionLayerBase):
                     attn_metadata = attn_metadata[self.layer_name]
                 self_kv_cache = self.kv_cache[forward_context.virtual_engine]
                 return self.impl.forward(
-                    self, query, key, value, self_kv_cache, attn_metadata
+                    self, query, key, value, self_kv_cache, attn_metadata, adaptor=self.adaptor
                 )
             else:
+                forward_context = get_forward_context()
+                forward_context.additional_kwargs['adaptor'] = self.adaptor
                 return torch.ops.vllm.unified_attention(
                     query, key, value, self.layer_name
                 )
@@ -780,7 +796,9 @@ def unified_attention(
     layer_name: str,
 ) -> torch.Tensor:
     attn_metadata, self, kv_cache = get_attention_context(layer_name)
-    output = self.impl.forward(self, query, key, value, kv_cache, attn_metadata)
+    forward_context = get_forward_context()
+    adaptor = forward_context.additional_kwargs.get('adaptor', None)
+    output = self.impl.forward(self, query, key, value, kv_cache, attn_metadata, adaptor=adaptor)
 
     return output
 
@@ -812,6 +830,8 @@ def unified_attention_with_output(
     output_block_scale: torch.Tensor | None = None,
 ) -> None:
     attn_metadata, self, kv_cache = get_attention_context(layer_name)
+    forward_context = get_forward_context()
+    adaptor = forward_context.additional_kwargs.get('adaptor', None)
 
     self.impl.forward(
         self,
@@ -820,6 +840,7 @@ def unified_attention_with_output(
         value,
         kv_cache,
         attn_metadata,
+        adaptor=adaptor,
         output=output,
         output_scale=output_scale,
         output_block_scale=output_block_scale,

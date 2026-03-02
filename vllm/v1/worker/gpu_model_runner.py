@@ -3182,7 +3182,7 @@ class GPUModelRunner(
             num_scheduled_tokens_np = np.array(tokens, dtype=np.int32)
             max_num_scheduled_tokens = int(num_scheduled_tokens_np.max())
             num_tokens_unpadded = scheduler_output.total_num_scheduled_tokens
-
+            # TODO: to be modified for DDSA, distributed kvcache store
             logits_indices, spec_decode_metadata = self._prepare_inputs(
                 scheduler_output,
                 num_scheduled_tokens_np,
@@ -3259,7 +3259,7 @@ class GPUModelRunner(
                     cascade_attn_prefix_lens=cascade_attn_prefix_lens,
                 )
             )
-
+            # TODO: to be modified for DDSA, distributed kvcache store
             (
                 input_ids,
                 inputs_embeds,
@@ -3285,6 +3285,11 @@ class GPUModelRunner(
         has_encoder_input = (
             self.model_config.is_encoder_decoder and num_encoder_reqs > 0
         )
+
+        # TODO: attention_metadata modification
+
+
+        print(f"DDSA: {__name__}, input_ids.shape: {input_ids.shape}, positions.shape: {positions.shape}", flush=True)
 
         # Run the model.
         # Use persistent buffers for CUDA graphs.
