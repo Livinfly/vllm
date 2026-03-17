@@ -3289,7 +3289,7 @@ class GPUModelRunner(
         # TODO: attention_metadata modification
 
 
-        print(f"DDSA: {__name__}, input_ids.shape: {input_ids.shape}, positions.shape: {positions.shape}", flush=True)
+        # print(f"DDSA: {__name__}, input_ids.shape: {input_ids.shape}, positions.shape: {positions.shape}", flush=True)
 
         # Run the model.
         # Use persistent buffers for CUDA graphs.

@@ -1,0 +1,36 @@
+{
+  "model": "Qwen/Qwen2.5-7B",
+  "dp_size": 2,
+  "tp_size": 1,
+  "distribution": "extreme",
+  "lengths": [
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    32768
+  ],
+  "num_requests_per_length": 2,
+  "output_len": 128,
+  "max_model_len": null,
+  "seed": 42,
+  "assignments": {
+    "rank_0": [
+      1024,
+      1024,
+      2048,
+      2048,
+      4096,
+      4096
+    ],
+    "rank_1": [
+      8192,
+      8192,
+      16384,
+      16384,
+      32768,
+      32768
+    ]
+  }
+}

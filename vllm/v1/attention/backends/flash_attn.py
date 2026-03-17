@@ -695,7 +695,7 @@ class FlashAttentionImpl(AttentionImpl):
         select_result = None
 
         if adaptor is not None:
-            print(f"DDSA: {__name__}, attn_adaptor.pre_forward start", flush=True)
+            # print(f"DDSA: {__name__}, attn_adaptor.pre_forward start", flush=True)
             selected_key_cache, selected_value_cache, adapted_metadata, select_result = \
                 adaptor.pre_forward(
                     query,
@@ -703,7 +703,7 @@ class FlashAttentionImpl(AttentionImpl):
                     value_cache,
                     attn_metadata
                 )
-            print(f"DDSA: {__name__}, attn_adaptor.pre_forward end", flush=True)
+            # print(f"DDSA: {__name__}, attn_adaptor.pre_forward end", flush=True)
             # 使用选择后的 kv cache 和 adapted metadata
             if select_result is not None:
                 key_cache = selected_key_cache

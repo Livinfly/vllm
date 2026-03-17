@@ -50,24 +50,24 @@ class FlashAttentionMetadataAdaptor(AttentionMetadataAdaptor):
         # 浅拷贝 metadata，只替换需要修改的字段
         adapted_metadata = copy.copy(attn_metadata)
         
-        print(f"DDSA: FlashAttentionMetadataAdaptor.adapt:")
-        print("ori:")
-        print(f"block_table: {adapted_metadata.block_table}")
-        print(f"seq_lens: {adapted_metadata.seq_lens}")
-        print(f"max_seq_len: {adapted_metadata.max_seq_len}")
-        print("new:")
-        print(f"block_table: {select_result.new_block_table}")
-        print(f"seq_lens: {select_result.new_seq_lens}")
-        print(f"max_seq_len: {select_result.new_max_seq_len}")
+        # print(f"DDSA: FlashAttentionMetadataAdaptor.adapt:")
+        # print("ori:")
+        # print(f"block_table: {adapted_metadata.block_table}")
+        # print(f"seq_lens: {adapted_metadata.seq_lens}")
+        # print(f"max_seq_len: {adapted_metadata.max_seq_len}")
+        # print("new:")
+        # print(f"block_table: {select_result.new_block_table}")
+        # print(f"seq_lens: {select_result.new_seq_lens}")
+        # print(f"max_seq_len: {select_result.new_max_seq_len}")
 
         # 更新 block_table 和 seq_lens
         adapted_metadata.block_table = select_result.new_block_table
         adapted_metadata.seq_lens = select_result.new_seq_lens
         adapted_metadata.max_seq_len = select_result.new_max_seq_len
 
-        print(f"DDSA: FlashAttentionMetadataAdaptor adapted:", flush=True)
-        print(f"  original max_seq_len: {select_result.original_max_seq_len} "
-              f"-> new max_seq_len: {select_result.new_max_seq_len}", flush=True)
+        # print(f"DDSA: FlashAttentionMetadataAdaptor adapted:", flush=True)
+        # print(f"  original max_seq_len: {select_result.original_max_seq_len} "
+        #       f"-> new max_seq_len: {select_result.new_max_seq_len}", flush=True)
 
         return adapted_metadata
 
@@ -86,6 +86,6 @@ class FlashAttentionMetadataAdaptor(AttentionMetadataAdaptor):
         recovered_metadata.seq_lens = select_result.original_seq_lens
         recovered_metadata.max_seq_len = select_result.original_max_seq_len
 
-        print(f"DDSA: FlashAttentionMetadataAdaptor recovered to original", flush=True)
+        # print(f"DDSA: FlashAttentionMetadataAdaptor recovered to original", flush=True)
 
         return recovered_metadata

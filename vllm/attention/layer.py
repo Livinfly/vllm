@@ -292,7 +292,7 @@ class Attention(nn.Module, AttentionLayerBase):
         self.adaptor = adaptor_cls()
         if not self.adaptor.dsa_config.dsa_enabled:
             self.adaptor = None
-        print(f"DDSA: {__name__}, attn_adaptor: {self.adaptor}", flush=True)
+        # print(f"DDSA: {__name__}, attn_adaptor: {self.adaptor}", flush=True)
 
         self.backend = AttentionBackendEnum[self.attn_backend.get_name()]
         self.dtype = dtype
@@ -375,7 +375,7 @@ class Attention(nn.Module, AttentionLayerBase):
 
         # TODO: pre_attention, args
         # self.adaptor.pre_attention()
-        print(f"DDSA: {__name__}, attn_adaptor.pre_attention, no impl", flush=True)
+        # print(f"DDSA: {__name__}, attn_adaptor.pre_attention, no impl", flush=True)
 
         if self.use_output:
             if output_shape is None:

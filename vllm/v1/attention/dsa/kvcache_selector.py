@@ -1,4 +1,3 @@
-from turtle import st
 from typing import Optional
 import torch
 
@@ -28,7 +27,7 @@ class KVCacheSelector:
         strategy_impl_cls = strategy_map.get(strategy_type)
         assert strategy_impl_cls is not None
         strategy_impl = strategy_impl_cls(dsa_config=self.dsa_config)
-        print(f"DDSA: {__name__}, KVCacheSelector, strategy_impl: {strategy_impl}", flush=True)
+        # print(f"DDSA: {__name__}, KVCacheSelector, strategy_impl: {strategy_impl}", flush=True)
 
         selected_key_cache, selected_value_cache, select_result = \
             strategy_impl.select(selection_context=selection_context)

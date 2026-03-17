@@ -6,8 +6,11 @@ varying prompt lengths. Each DP rank runs as an independent process with its
 own LLM instance and processes a pre-assigned set of requests.
 
 Usage:
-    python experiments/dp_imbalance_baseline.py \
-        --model Qwen/Qwen2.5-7B \
+    CUDA_VISIBLE_DEVICES=2,3 \
+        python experiments/dp_imbalance_baseline.py \
+        --enforce-eager \
+        --gpu-memory-utilization 0.9 \
+        --model ../models/Qwen/Qwen2.5-3B \
         --dp-size 2 \
         --distribution extreme \
         --lengths 1024,2048,4096,8192,16384,32768 \

@@ -38,7 +38,7 @@ class QuestSelectStrategy(BaseSelectStrategy):
         # TODO: vllm_config.cache_config.block_size;
         # `check_and_update_config` for cuda, default 16, --block-size
         self.block_size = dsa_config.block_size
-        print(f"DDSA: {__name__}, QuestSelectStrategy __init__", flush=True)
+        # print(f"DDSA: {__name__}, QuestSelectStrategy __init__", flush=True)
         # TODO: cached min, max blocks
 
 
@@ -66,7 +66,7 @@ class QuestSelectStrategy(BaseSelectStrategy):
         value_cache = selection_context.value_cache
         attn_metadata = selection_context.attn_metadata
 
-        print(f"DDSA: {__name__}, QuestSelectStrategy select start", flush=True)
+        # print(f"DDSA: {__name__}, QuestSelectStrategy select start", flush=True)
         # TODO: get_batch_size from attn_metadata, now for FA
         # assert isinstance(attn_metadata, "FlashAttentionMetadata")
         batch_size = attn_metadata.seq_lens.shape[0]
@@ -82,9 +82,9 @@ class QuestSelectStrategy(BaseSelectStrategy):
         head_dim = query.shape[-1]
         num_kv_heads = key_cache.shape[-2]
 
-        print(f"DDSA: batch_size={batch_size}, "
-              f"num_q_heads={num_q_heads}, num_kv_heads={num_kv_heads}, head_dim={head_dim}", flush=True)
-        print(f"DDSA: key_cache.shape={key_cache.shape}, query.shape={query.shape}", flush=True)
+        # print(f"DDSA: batch_size={batch_size}, "
+        #       f"num_q_heads={num_q_heads}, num_kv_heads={num_kv_heads}, head_dim={head_dim}", flush=True)
+        # print(f"DDSA: key_cache.shape={key_cache.shape}, query.shape={query.shape}", flush=True)
 
         # Prefill
         # if max_query_len > 1:
@@ -118,7 +118,7 @@ class QuestSelectStrategy(BaseSelectStrategy):
         k_block_min = key_cache_rep.amin(dim=1)  
         k_block_max = key_cache_rep.amax(dim=1)
 
-        print(f"DDSA: k_block_min.shape={k_block_min.shape}", flush=True)
+        # print(f"DDSA: k_block_min.shape={k_block_min.shape}", flush=True)
 
         new_block_tables = []
         new_seq_lens_list = []
@@ -141,19 +141,19 @@ class QuestSelectStrategy(BaseSelectStrategy):
             req_blocks = all_req_blocks[:actual_blocks_needed]
             num_active_blocks = req_blocks.shape[0]
 
-            print(f"DDSA: req {i}, seq_len={original_seq_len}, "
-                  f"all_blocks={all_req_blocks.tolist()}, "
-                  f"actual_needed={actual_blocks_needed}, "
-                  f"used_blocks={req_blocks.tolist()}", flush=True)
+            # print(f"DDSA: req {i}, seq_len={original_seq_len}, "
+            #       f"all_blocks={all_req_blocks.tolist()}, "
+            #       f"actual_needed={actual_blocks_needed}, "
+            #       f"used_blocks={req_blocks.tolist()}", flush=True)
 
             # prefill or ...
             if q_len > 1 or num_active_blocks == 0:
                 new_block_tables.append(block_table[i:i+1])
                 new_seq_lens_list.append(seq_lens[i:i+1])
-                print(f"DDSA: prefill skip {i}")
+                # print(f"DDSA: prefill skip {i}")
                 continue
             else:
-                print(f"DDSA: decode {i}")
+                # print(f"DDSA: decode {i}")
 
             # (num_active_blocks, num_q_heads, head_dim)
             req_k_min = k_block_min[req_blocks, :, :]
@@ -175,14 +175,14 @@ class QuestSelectStrategy(BaseSelectStrategy):
             # (num_active_blocks,)
             block_scores = scores_per_query.sum(dim=(0, 1))
 
-            print(f"DDSA: top_k {self.dsa_config.top_k}")
+            # print(f"DDSA: top_k {self.dsa_config.top_k}")
             top_k = min(self.dsa_config.top_k, num_active_blocks)
             _, top_k_indices = torch.topk(block_scores, k=top_k, largest=True)
 
             top_k_indices_sorted, _ = torch.sort(top_k_indices)
-            print(f"DDSA: top_k_indices_sorted.shape {top_k_indices_sorted.shape}, _ {_}")
+            # print(f"DDSA: top_k_indices_sorted.shape {top_k_indices_sorted.shape}, _ {_}")
             selected_blocks = req_blocks[top_k_indices_sorted]
-            print(f"DDSA: selected_blocks {selected_blocks}")
+            # print(f"DDSA: selected_blocks {selected_blocks}")
 
             max_num_blocks = block_table.shape[1]
             # (B, H, NB)
@@ -191,7 +191,7 @@ class QuestSelectStrategy(BaseSelectStrategy):
                 dtype=block_table.dtype,
                 device=device
             )
-            print(f"DDSA: max_num_blocks {max_num_blocks}, top_k {top_k}, selected_blocks.shape {selected_blocks.shape}")
+            # print(f"DDSA: max_num_blocks {max_num_blocks}, top_k {top_k}, selected_blocks.shape {selected_blocks.shape}")
             new_block_table_row[:top_k] = selected_blocks
             new_block_tables.append(new_block_table_row.unsqueeze(0))
 
@@ -209,8 +209,8 @@ class QuestSelectStrategy(BaseSelectStrategy):
 
             new_seq_lens_list.append(torch.tensor([new_seq_len], dtype=seq_lens.dtype, device=device))
 
-            print(f"DDSA: req {i}: original {num_active_blocks} blocks ({original_seq_len} tokens) -> "
-                  f"selected {top_k} blocks ({new_seq_len} tokens)", flush=True)
+            # print(f"DDSA: req {i}: original {num_active_blocks} blocks ({original_seq_len} tokens) -> "
+            #       f"selected {top_k} blocks ({new_seq_len} tokens)", flush=True)
 
         new_block_table = torch.cat(new_block_tables, dim=0)
         new_seq_lens = torch.cat(new_seq_lens_list, dim=0)
@@ -225,7 +225,7 @@ class QuestSelectStrategy(BaseSelectStrategy):
             original_max_seq_len=max_seq_len,
         )
 
-        print(f"DDSA: QuestSelectStrategy select end", flush=True)
+        # print(f"DDSA: QuestSelectStrategy select end", flush=True)
 
         return key_cache, value_cache, select_result
 
@@ -245,104 +245,3 @@ class DeepseekDSASelectStrategy(BaseSelectStrategy):
 class DistributedDSASelectStrategy(BaseSelectStrategy):
     # TODO: DDSA
     pass
-
-
-'''
-backup
-def select(
-        self,
-        selection_context: "SelectionContext",
-    ):
-        # (varlen, num_q_heads, head_dim)
-        query = selection_context.query
-        # (num_blocks, block_size, num_kv_heads, head_dim)
-        key_cache = selection_context.key_cache
-        value_cache = selection_context.value_cache
-        attn_metadata = selection_context.attn_metadata
-        print(f"DDSA: {__name__}, QuestSelectStrategy select, first test", flush=True)
-        # TODO: get_batch_size from attn_metadata, now for FA
-        # assert isinstance(attn_metadata, "FlashAttentionMetadata")
-        batch_size, device = attn_metadata.seq_lens.shape[0], query.device  # type: ignore
-        query_start_loc = attn_metadata.query_start_loc  # type: ignore
-
-
-        # get block stats
-        # (max_batch_size, max_num_blocks_per_req)   ; (batch_size, max_num_blocks_per_req)
-        block_table = attn_metadata.block_table
-        active_blocks_indices = (block_table > 0)
-        # active_blocks = block_table[active_blocks_indices].unique()
-        # active_blocks = block_table[active_blocks_indices]
-        active_blocks = [
-            block_table[i][active_blocks_indices[i]]
-            for i in range(batch_size)
-        ]
-
-        # TODO: check
-        # token_offs = torch.arange(self.block_size, device=key_cache.device)
-        # token_posi = active_blocks + token_offs
-
-        num_q_heads = query.shape[-2]
-        head_dim = query.shape[-1]
-        num_kv_heads = key_cache.shape[-2]
-
-        # key_cache_active = key_cache[active_blocks, :, :, :]
-        # value_cache_active = value_cache[active_blocks, :, :, :]
-
-        print(f"DDSA: {__name__}, attn_metadata: ", flush=True)
-        for k, v in attn_metadata.__dict__.items():
-            print(f"DDSA: {__name__}, {k}: {v}", flush=True)
-
-        print(f"DDSA: {__name__}, query.shape: {query.shape}", flush=True)
-        print(f"DDSA: {__name__}, key_cache.shape: {key_cache.shape}", flush=True)
-
-        print(f"DDSA: {__name__}, num_q_heads: {num_q_heads}, num_kv_heads: {num_kv_heads}", flush=True)
-        # print(f"DDSA: {__name__}, block_table.shape: {block_table.shape}, active_blocks_indices.shape: {active_blocks_indices.shape}, active_blocks.shape: {active_blocks.shape}", flush=True)
-        # print(f"DDSA: {__name__}, active_blocks: {active_blocks}", flush=True)
-        # print(f"DDSA: {__name__}, block_table: {block_table}", flush=True)
-
-        # print(f"DDSA: {__name__}, key_cache_active[:, :, 0, 0]: {key_cache_active[:, :, 0, 0]}", flush=True)
-        # print(f"DDSA: {__name__}, value_cache_active[:, :, 0, 0]: {value_cache_active[:, :, 0, 0]}", flush=True)
-    
-        assert num_q_heads % num_kv_heads == 0, (
-            f"num_q_heads ({num_q_heads}) is not divisible by num_kv_heads ({num_kv_heads})"
-        )
-
-        group_size = num_q_heads // num_kv_heads
-        if group_size > 1:
-            key_cache_rep = torch.repeat_interleave(
-                key_cache, 
-                group_size,
-                dim=-2
-            )
-            key_cache_rep = torch.repeat_interleave(
-                value_cache, 
-                group_size,
-                dim=-2
-            )
-
-        return None, None, None
-    
-        k_block_min = torch.where(
-            active_blocks_indices, 
-            key_cache,
-            torch.full_like(key_cache, float("inf"))
-        ).amin(dim=-1)
-        k_block_max = torch.where(
-            active_blocks_indices, 
-            key_cache,
-            torch.full_like(key_cache, float("-inf"))
-        ).amax(dim=-1)
-
-
-        # for i in range(batch_size):
-        #     k_block_min[i, active_blocks_indices[i, :]] = torch.amin(key_cache[active_blocks[i]], dim=-2)
-        #     k_block_max[i, active_blocks_indices[i, :]] = torch.amax(key_cache[active_blocks[i]], dim=-2)
-
-        print(f"DDSA: {__name__}, k_block_min.shape: {k_block_min.shape}", flush=True)
-        print(f"DDSA: {__name__}, k_block_min: {k_block_min}", flush=True)
-        print(f"DDSA: {__name__}, k_block_max.shape: {k_block_max.shape}", flush=True)
-        print(f"DDSA: {__name__}, k_block_max: {k_block_max}", flush=True)
-
-        for i in range(batch_size):
-            q = query[query_start_loc[i] : query_start_loc[i + 1]]
-'''

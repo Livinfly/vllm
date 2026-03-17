@@ -1,0 +1,67 @@
+=== DP Imbalance Baseline ===
+Model: ../models/Qwen/Qwen2.5-7B
+DP size: 2, TP size: 1
+Distribution: extreme
+Lengths: [1024, 2048, 4096, 8192, 16384, 32768]
+Requests per length: 2
+Output len: 128
+  Rank 0: 6 requests, lengths=[1024, 1024, 2048, 2048, 4096, 4096], total_tokens=14336
+  Rank 1: 6 requests, lengths=[8192, 8192, 16384, 16384, 32768, 32768], total_tokens=114688
+  Started rank 0 process (PID 325000)
+[Rank 1] Starting with 6 requests, lengths=[8192, 8192, 16384, 16384, 32768, 32768]
+INFO 03-17 01:42:26 [utils.py:267] non-default args: {'disable_log_stats': True, 'model': '../models/Qwen/Qwen2.5-7B'}
+[Rank 0] Starting with 6 requests, lengths=[1024, 1024, 2048, 2048, 4096, 4096]
+INFO 03-17 01:42:26 [utils.py:267] non-default args: {'disable_log_stats': True, 'model': '../models/Qwen/Qwen2.5-7B'}
+INFO 03-17 01:42:26 [model.py:530] Resolved architecture: Qwen2ForCausalLM
+INFO 03-17 01:42:26 [model.py:530] Resolved architecture: Qwen2ForCausalLM
+INFO 03-17 01:42:26 [model.py:1547] Using max model len 131072
+INFO 03-17 01:42:26 [model.py:1547] Using max model len 131072
+Process Process-1:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/infer/lj/vllm-ddsa/experiments/dp_imbalance_baseline.py", line 162, in run_rank
+    llm = LLM(**engine_kwargs)
+          ^^^^^^^^^^^^^^^^^^^^
+  File "/home/infer/lj/vllm-ddsa/vllm/entrypoints/llm.py", line 338, in __init__
+    self.llm_engine = LLMEngine.from_engine_args(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/infer/lj/vllm-ddsa/vllm/v1/engine/llm_engine.py", line 170, in from_engine_args
+    vllm_config = engine_args.create_engine_config(usage_context)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/infer/lj/vllm-ddsa/vllm/engine/arg_utils.py", line 1579, in create_engine_config
+    parallel_config = ParallelConfig(
+                      ^^^^^^^^^^^^^^^
+  File "/home/infer/lj/vllm-ddsa/.venv/lib/python3.12/site-packages/pydantic/_internal/_dataclasses.py", line 121, in __init__
+    s.__pydantic_validator__.validate_python(ArgsKwargs(args, kwargs), self_instance=s)
+pydantic_core._pydantic_core.ValidationError: 1 validation error for ParallelConfig
+  Value error, Offline data parallel mode is not supported/useful for dense models. [type=value_error, input_value=ArgsKwargs((), {'pipeline...'_api_process_rank': 0}), input_type=ArgsKwargs]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+Process Process-2:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/infer/lj/vllm-ddsa/experiments/dp_imbalance_baseline.py", line 162, in run_rank
+    llm = LLM(**engine_kwargs)
+          ^^^^^^^^^^^^^^^^^^^^
+  File "/home/infer/lj/vllm-ddsa/vllm/entrypoints/llm.py", line 338, in __init__
+    self.llm_engine = LLMEngine.from_engine_args(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/infer/lj/vllm-ddsa/vllm/v1/engine/llm_engine.py", line 170, in from_engine_args
+    vllm_config = engine_args.create_engine_config(usage_context)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/infer/lj/vllm-ddsa/vllm/engine/arg_utils.py", line 1579, in create_engine_config
+    parallel_config = ParallelConfig(
+                      ^^^^^^^^^^^^^^^
+  File "/home/infer/lj/vllm-ddsa/.venv/lib/python3.12/site-packages/pydantic/_internal/_dataclasses.py", line 121, in __init__
+    s.__pydantic_validator__.validate_python(ArgsKwargs(args, kwargs), self_instance=s)
+pydantic_core._pydantic_core.ValidationError: 1 validation error for ParallelConfig
+  Value error, Offline data parallel mode is not supported/useful for dense models. [type=value_error, input_value=ArgsKwargs((), {'pipeline...'_api_process_rank': 0}), input_type=ArgsKwargs]
+    For further information visit https://errors.pydantic.dev/2.12/v/value_error
+  Started rank 1 process (PID 325001)
+[ERROR] Rank 0 exited with code 1
+[ERROR] Rank 1 exited with code 1
