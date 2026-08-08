@@ -92,6 +92,7 @@ from vllm.model_executor.models.utils import (
     sequence_parallel_chunk,
 )
 from vllm.platforms import current_platform
+from vllm.profiler.pcp_dcp_mla import profile_scope
 from vllm.sequence import IntermediateTensors
 from vllm.utils.torch_utils import direct_register_custom_op
 from vllm.v1.attention.backend import AttentionBackend
@@ -1185,6 +1186,7 @@ class DeepseekV2MLAAttention(nn.Module):
             allow_short_prefill_indexer_scoring_skip=not is_mtp_layer,
         )
 
+    @profile_scope("self_attn")
     def forward(
         self,
         positions: torch.Tensor,
@@ -1289,6 +1291,7 @@ class DeepseekV2DecoderLayer(nn.Module):
         )
         self.routed_scaling_factor = getattr(config, "routed_scaling_factor", 1.0)
 
+    @profile_scope("full_layer")
     def forward(
         self,
         positions: torch.Tensor,

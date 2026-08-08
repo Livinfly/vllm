@@ -170,7 +170,8 @@ def warmup_kernels(
     # Use decode_query_len + 1 tokens so the prefill batch's per-request query
     # length exceeds decode_query_len, preventing it from being misclassified as
     # a uniform decode batch.
-    prompt_len = decode_query_len + 1
+    pcp_size = model_runner.vllm_config.parallel_config.prefill_context_parallel_size
+    prompt_len = max(decode_query_len + 1, 2 * pcp_size)
     prompt_token_ids = list(range(prompt_len))
     # Upper bound on the decode steps built in `decode_steps` below.
     num_decode_steps = 1

@@ -8,6 +8,7 @@ import torch
 from vllm.config import CUDAGraphMode, VllmConfig
 from vllm.distributed.parallel_state import get_dcp_group, get_pcp_group
 from vllm.logger import init_logger
+from vllm.profiler.pcp_dcp_mla import mark, timed_range
 from vllm.v1.attention.backends.utils import PAD_SLOT_ID
 from vllm.v1.worker.gpu.block_table import BlockTables
 from vllm.v1.worker.gpu.buffer_utils import async_copy_to_gpu
@@ -385,6 +386,18 @@ class PCPManager:
 
         num_local_tokens = int(local_num_scheduled_tokens.sum())
         num_local_tokens_padded = max(per_rank_num_tokens)
+        mark(
+            "pcp_partition",
+            local_tokens=num_local_tokens,
+            padded_local_tokens=num_local_tokens_padded,
+            segment_lengths=tuple(segment.num_tokens for segment in local_segments),
+            segment_slices=",".join(
+                f"{segment.global_batch_slice.start}:{segment.global_batch_slice.stop}"
+                for segment in local_segments
+            ),
+            scheduled_tokens=tuple(int(value) for value in num_scheduled_tokens),
+            computed_tokens=tuple(int(value) for value in num_computed_tokens),
+        )
         fresh_prefills = int(
             np.count_nonzero(is_prefilling & (num_computed_tokens == 0))
         )
@@ -607,7 +620,20 @@ class PCPManager:
     def restore_hidden_states(self, hidden_states: torch.Tensor) -> torch.Tensor:
         if self._hidden_restore_idx is None:
             return hidden_states
-        gathered = get_pcp_group().all_gather(hidden_states, dim=0)
+        pcp_group = get_pcp_group()
+        local_bytes = hidden_states.numel() * hidden_states.element_size()
+        with timed_range(
+            "hidden_restore_comm",
+            collective="pcp_all_gather",
+            local_tokens=hidden_states.shape[0],
+            width=hidden_states.shape[-1],
+            dtype=hidden_states.dtype,
+            element_size=hidden_states.element_size(),
+            world_size=pcp_group.world_size,
+            send_bytes=local_bytes * (pcp_group.world_size - 1),
+            recv_bytes=local_bytes * (pcp_group.world_size - 1),
+        ):
+            gathered = pcp_group.all_gather(hidden_states, dim=0)
         return gathered[self._hidden_restore_idx]
 
     def restore_for_sampling(

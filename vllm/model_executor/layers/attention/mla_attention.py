@@ -263,6 +263,7 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import (
 )
 from vllm.model_executor.utils import replace_parameter
 from vllm.platforms import current_platform
+from vllm.profiler.pcp_dcp_mla import timed_range
 from vllm.utils.flashinfer import has_flashinfer
 from vllm.utils.math_utils import cdiv, round_down
 from vllm.utils.torch_utils import (
@@ -2607,7 +2608,7 @@ class MLACommonBaseImpl(MLAAttentionImpl[A], Generic[A]):
         output_lse = None
         workspace = chunked_context.workspace
 
-        for chunk in chunked_context.chunks:
+        for chunk_index, chunk in enumerate(chunked_context.chunks):
             assert chunk.padded_local_seq_lens is not None
             assert chunk.local_context_lens_allranks is not None
             assert chunk.padded_local_cu_seq_lens is not None
@@ -2660,9 +2661,27 @@ class MLACommonBaseImpl(MLAAttentionImpl[A], Generic[A]):
             ]
             assert toks * dcp_world_size <= cur_allgather_workspace.shape[0]
             cur_allgather_kvcache = cur_allgather_workspace[: toks * dcp_world_size]
-            cur_allgather_kvcache.copy_(
-                get_dcp_group().all_gather(local_gathered_kvcache, dim=0)
+            local_bytes = (
+                local_gathered_kvcache.numel() * local_gathered_kvcache.element_size()
             )
+            with timed_range(
+                "context_attention_comm",
+                collective="dcp_all_gather",
+                chunk=chunk_index,
+                requests=chunk.num_requests,
+                local_tokens=toks,
+                context_tokens=chunk.num_context_tokens,
+                width=local_gathered_kvcache.shape[-1],
+                dtype=local_gathered_kvcache.dtype,
+                element_size=local_gathered_kvcache.element_size(),
+                world_size=dcp_world_size,
+                send_bytes=local_bytes * (dcp_world_size - 1),
+                recv_bytes=local_bytes * (dcp_world_size - 1),
+            ):
+                gathered_kvcache = get_dcp_group().all_gather(
+                    local_gathered_kvcache, dim=0
+                )
+            cur_allgather_kvcache.copy_(gathered_kvcache)
             assert (
                 cur_allgather_kvcache.shape[-1]
                 == self.kv_lora_rank + self.qk_rope_head_dim
