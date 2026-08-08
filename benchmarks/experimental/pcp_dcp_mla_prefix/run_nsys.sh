@@ -30,10 +30,12 @@ case "$mode" in
     nsys)
         measured_label=nsys_0
         profile_name=prefix80k_suffix256
+        unique_prefix_send_bytes=47185920
         ;;
     smoke-nsys)
         measured_label=smoke_nsys_0
         profile_name=prefix1k_suffix256
+        unique_prefix_send_bytes=589824
         ;;
     *)
         echo "MODE must be nsys or smoke-nsys" >&2
@@ -67,6 +69,11 @@ nsys_args=(
     --force-overwrite=true
     --output="$profile_prefix"
 )
+discard_environment=0
+if [[ "$profile_help" == *"--discard-environment"* ]]; then
+    nsys_args+=(--discard-environment=true)
+    discard_environment=1
+fi
 if [[ "$profile_help" == *"--trace-fork-before-exec"* ]]; then
     nsys_args+=(--trace-fork-before-exec=true)
 fi
@@ -87,19 +94,39 @@ driver=(
 )
 driver+=("$@")
 
+sensitive_env_names=()
+while IFS= read -r name; do
+    case "${name^^}" in
+        *TOKEN* | *KEY* | *SECRET* | *PASSWORD* | *CREDENTIAL*)
+            sensitive_env_names+=("$name")
+            ;;
+    esac
+done < <(compgen -e)
+
 printf 'Resolved command:'
-printf ' %q' env PCP_DCP_MLA_PROFILE=1 VLLM_NVTX_SCOPES_FOR_PROFILING=1
+launch=(env)
+for name in "${sensitive_env_names[@]}"; do
+    launch+=(-u "$name")
+done
+launch+=(PCP_DCP_MLA_PROFILE=1 VLLM_NVTX_SCOPES_FOR_PROFILING=1)
+printf ' %q' "${launch[@]}"
 printf ' %q' "${nsys_args[@]}" "${driver[@]}"
 printf '\n'
 if [[ ${DRY_RUN:-0} == 1 ]]; then
     exit 0
 fi
+if (( ! discard_environment && ${#sensitive_env_names[@]} > 0 )) &&
+    [[ ${ALLOW_NSYS_ENV_CAPTURE:-0} != 1 ]]; then
+    echo "This nsys lacks --discard-environment and may retain host secrets." >&2
+    echo "Use a newer nsys, or explicitly set ALLOW_NSYS_ENV_CAPTURE=1." >&2
+    exit 1
+fi
+if (( ! discard_environment )); then
+    echo "Warning: raw report may contain host metadata; do not publish it." >&2
+fi
 
 mkdir -p "$run_dir"
-env \
-    PCP_DCP_MLA_PROFILE=1 \
-    VLLM_NVTX_SCOPES_FOR_PROFILING=1 \
-    "${nsys_args[@]}" "${driver[@]}"
+"${launch[@]}" "${nsys_args[@]}" "${driver[@]}"
 
 report="${profile_prefix}.nsys-rep"
 if [[ ! -f "$report" ]]; then
@@ -111,7 +138,22 @@ fi
     benchmarks/experimental/pcp_dcp_mla_prefix/analyze_nsys.py \
     --input "$report" \
     --output-dir "$run_dir/precise-analysis" \
-    --label "$measured_label"
+    --label "$measured_label" \
+    --unique-prefix-send-bytes "$unique_prefix_send_bytes"
+
+sqlite="$run_dir/precise-analysis/${profile_name}.sqlite"
+portable_sqlite="$run_dir/precise-analysis/${profile_name}.portable.sqlite"
+.venv/bin/python \
+    benchmarks/experimental/pcp_dcp_mla_prefix/sanitize_nsys_sqlite.py \
+    --input "$sqlite" \
+    --output "$portable_sqlite" \
+    --source-report "$report" \
+    --force
+if (( discard_environment )); then
+    .venv/bin/python \
+        benchmarks/experimental/pcp_dcp_mla_prefix/sanitize_nsys_sqlite.py \
+        --verify-file "$report"
+fi
 
 if [[ ${RUN_OVERVIEW:-1} == 1 ]]; then
     .venv/bin/python \
@@ -122,4 +164,5 @@ if [[ ${RUN_OVERVIEW:-1} == 1 ]]; then
 fi
 
 echo "Report: $report"
+echo "Portable SQLite: $portable_sqlite"
 echo "Results: $run_dir"

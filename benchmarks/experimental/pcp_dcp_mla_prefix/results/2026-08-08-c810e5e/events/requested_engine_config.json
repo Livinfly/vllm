@@ -1,0 +1,37 @@
+{
+  "attention_config": {
+    "backend": "auto"
+  },
+  "block_size": 64,
+  "compilation_config": {
+    "cudagraph_mode": "NONE"
+  },
+  "cp_kv_cache_interleave_size": 1,
+  "dcp_comm_backend": "ag_rs",
+  "decode_context_parallel_size": 2,
+  "disable_log_stats": false,
+  "distributed_executor_backend": "mp",
+  "dtype": "bfloat16",
+  "enable_chunked_prefill": true,
+  "enable_layerwise_nvtx_tracing": true,
+  "enable_prefix_caching": true,
+  "enforce_eager": true,
+  "gpu_memory_utilization": 0.2,
+  "hf_overrides": {
+    "num_hidden_layers": 1,
+    "num_nextn_predict_layers": 0,
+    "quantization_config": null
+  },
+  "kv_cache_dtype": "bfloat16",
+  "load_format": "dummy",
+  "max_model_len": 131072,
+  "max_num_batched_tokens": 8192,
+  "max_num_seqs": 1,
+  "model": "deepseek-ai/DeepSeek-V3",
+  "prefill_context_parallel_size": 2,
+  "revision": null,
+  "seed": 17,
+  "skip_tokenizer_init": true,
+  "tensor_parallel_size": 1,
+  "worker_extension_cls": "vllm.profiler.pcp_dcp_mla.PCPDCPMLAWorkerExtension"
+}

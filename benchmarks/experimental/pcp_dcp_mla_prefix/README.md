@@ -5,9 +5,11 @@ DeepSeek-V3 layer with TP=1, PCP=2, and DCP=2 on two H100s. It uses dummy,
 unquantized BF16 weights, BF16 activations, a BF16 KV cache, eager execution,
 and automatic attention-backend selection.
 
-The default run is frozen to `c810e5ee9976ad86b81d1277b53e76d0ee639414`,
-the source commit matching the available `cu129` precompiled wheel. The driver
-also verifies that PR #46570's merge commit
+The native-extension baseline is frozen to
+`c810e5ee9976ad86b81d1277b53e76d0ee639414`, the source commit matching the
+available `cu129` precompiled wheel. The driver verifies that this commit is an
+ancestor of the experiment-code HEAD and that the installed wheel version has
+the matching commit marker. It also verifies that PR #46570's merge commit
 `b6ff8a2f509cc7ac9c58176f5115a836aa1e08bd` is an ancestor. Override
 `--expected-git-sha` only when deliberately moving to another matching wheel.
 
@@ -94,9 +96,18 @@ MODE=nsys RUN_DIR=artifacts/pcp-dcp-nsys \
 ```
 
 The launcher checks the installed `nsys profile --help`. It enables child
-process tracing and `cudaProfilerApi` capture only when those flags exist. The
-driver primes and warms the cache before calling `cudaProfilerStart`, then
-profiles exactly one distinct suffix request.
+process tracing, `cudaProfilerApi` capture, and `--discard-environment` only
+when those flags exist. The driver primes and warms the cache before calling
+`cudaProfilerStart`, then profiles exactly one distinct suffix request.
+
+Nsight Systems versions without `--discard-environment` can retain host-side
+environment metadata even when the target process starts with a scrubbed
+environment. If credential-like variables exist, the launcher fails closed on
+such versions unless `ALLOW_NSYS_ENV_CAPTURE=1` is explicitly set. Raw reports
+from that opt-in mode must remain local. The launcher also writes a portable
+SQLite containing only experiment NVTX markers, CUDA launches, GPU kernels, and
+their referenced names. The portable database is independently accepted by
+`analyze_nsys.py` and is checked against current credential-like values.
 
 ## Workload and evidence
 
@@ -148,7 +159,8 @@ The launcher invokes `analyze_nsys.py`. It can also be run directly:
   benchmarks/experimental/pcp_dcp_mla_prefix/analyze_nsys.py \
   --input artifacts/pcp-dcp-nsys/prefix80k_suffix256.nsys-rep \
   --output-dir artifacts/pcp-dcp-nsys/precise-analysis \
-  --label nsys_0
+  --label nsys_0 \
+  --unique-prefix-send-bytes 47185920
 ```
 
 The analyzer exports SQLite, resolves NVTX ranges, joins CUDA runtime launches

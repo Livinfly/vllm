@@ -68,8 +68,13 @@ def _git_output(*args: str) -> str | None:
 
 def _validate_repository(expected_sha: str) -> dict[str, Any]:
     head = _git_output("rev-parse", "HEAD")
-    if head != expected_sha:
-        raise RuntimeError(f"Expected git SHA {expected_sha}, got {head}.")
+    source_ancestor = _run_command(
+        ["git", "merge-base", "--is-ancestor", expected_sha, "HEAD"]
+    )
+    if source_ancestor["returncode"] != 0:
+        raise RuntimeError(
+            f"Precompiled source SHA {expected_sha} is not an ancestor of {head}."
+        )
     ancestor = _run_command(
         ["git", "merge-base", "--is-ancestor", REQUIRED_PCP_COMMIT, "HEAD"]
     )
@@ -79,7 +84,9 @@ def _validate_repository(expected_sha: str) -> dict[str, Any]:
             "from PR #46570."
         )
     return {
-        "expected_git_sha": expected_sha,
+        "experiment_git_sha": head,
+        "precompiled_source_sha": expected_sha,
+        "precompiled_source_is_ancestor": True,
         "required_pr": "https://github.com/vllm-project/vllm/pull/46570",
         "required_commit": REQUIRED_PCP_COMMIT,
         "required_commit_is_ancestor": True,
@@ -213,7 +220,9 @@ def _validate_hf_config(config: dict[str, Any]) -> None:
 
 
 def _validate_worker_metadata(
-    rows: list[dict[str, Any]], expect_outer_backend: str
+    rows: list[dict[str, Any]],
+    expect_outer_backend: str,
+    expected_source_sha: str,
 ) -> None:
     if {row["rank"] for row in rows} != {0, 1}:
         raise RuntimeError(f"Expected ranks 0 and 1, got: {rows}")
@@ -222,6 +231,17 @@ def _validate_worker_metadata(
             raise RuntimeError(f"Expected world size 2: {row}")
         if row["parameter_dtypes"] != ["torch.bfloat16"]:
             raise RuntimeError(f"Weights are not exclusively BF16: {row}")
+        distribution_version = row["vllm_distribution_version"]
+        wheel_commit = (
+            distribution_version.split("+g", 1)[1].split(".", 1)[0]
+            if "+g" in distribution_version
+            else ""
+        )
+        if len(wheel_commit) < 7 or not expected_source_sha.startswith(wheel_commit):
+            raise RuntimeError(
+                "Installed vLLM wheel does not match the frozen source commit: "
+                f"expected {expected_source_sha}, got {distribution_version}"
+            )
         if row["quantization"] is not None:
             raise RuntimeError(f"Unexpected quantization: {row}")
         if row["decoder_layers"] != [
@@ -604,7 +624,11 @@ def main() -> None:
 
     worker_metadata = llm.collective_rpc("pcp_dcp_mla_profile_metadata")
     _write_json(output_dir / "worker_metadata.json", worker_metadata)
-    _validate_worker_metadata(worker_metadata, args.expect_outer_backend.upper())
+    _validate_worker_metadata(
+        worker_metadata,
+        args.expect_outer_backend.upper(),
+        args.expected_git_sha,
+    )
 
     vocab_size = int(hf_config["vocab_size"])
     prefix = _make_prefix(prefix_tokens, vocab_size, args.seed)

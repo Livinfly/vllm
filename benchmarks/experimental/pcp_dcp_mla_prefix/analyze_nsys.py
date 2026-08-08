@@ -428,6 +428,7 @@ def _rank_summary(
     ranges: list[NvtxRange],
     kernels: list[Kernel],
     nccl_pattern: re.Pattern[str],
+    unique_prefix_send_bytes: int | None,
 ) -> dict[str, Any]:
     rank_ranges = [
         marker
@@ -476,6 +477,11 @@ def _rank_summary(
     context["send_only_effective_bandwidth_GBps"] = (
         context["send_bytes"] / context_seconds / 1e9
     )
+    if unique_prefix_send_bytes is not None:
+        context["unique_prefix_send_bytes"] = unique_prefix_send_bytes
+        context["unique_prefix_send_only_effective_bandwidth_GBps"] = (
+            unique_prefix_send_bytes / context_seconds / 1e9
+        )
     attention_path_kernels = _unique_kernels(
         [
             kernel
@@ -519,7 +525,7 @@ def _rank_summary(
 
 def _write_ranges(path: Path, ranges: list[NvtxRange]) -> None:
     with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
+        writer = csv.writer(file, lineterminator="\n")
         writer.writerow(
             ["rowid", "pid", "tid", "start_ns", "end_ns", "fields_json", "message"]
         )
@@ -539,7 +545,7 @@ def _write_ranges(path: Path, ranges: list[NvtxRange]) -> None:
 
 def _write_kernels(path: Path, kernels: list[Kernel]) -> None:
     with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
+        writer = csv.writer(file, lineterminator="\n")
         writer.writerow(
             [
                 "rowid",
@@ -601,7 +607,7 @@ def _write_summary_csv(path: Path, result: dict[str, Any]) -> None:
             )
     fieldnames = sorted({key for row in rows for key in row})
     with path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer = csv.DictWriter(file, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -632,6 +638,7 @@ def analyze(
     expected_label: str | None,
     expected_ranks: int,
     nccl_regex: str,
+    unique_prefix_send_bytes: int | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     sqlite_path = _export_sqlite(input_path, output_dir)
@@ -671,7 +678,15 @@ def analyze(
         raise RuntimeError(f"Expected ranks 0..{expected_ranks - 1}, got {ranks}")
     nccl_pattern = re.compile(nccl_regex)
     rank_results = [
-        _rank_summary(rank, label, ranges, kernels, nccl_pattern) for rank in ranks
+        _rank_summary(
+            rank,
+            label,
+            ranges,
+            kernels,
+            nccl_pattern,
+            unique_prefix_send_bytes,
+        )
+        for rank in ranks
     ]
     headline = {}
     for scope in ("self_attn", "full_layer"):
@@ -685,6 +700,7 @@ def analyze(
         "sqlite": str(sqlite_path),
         "label": label,
         "nccl_regex": nccl_regex,
+        "unique_prefix_send_bytes": unique_prefix_send_bytes,
         "ranks": rank_results,
         "headline": headline,
     }
@@ -795,6 +811,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--label")
     parser.add_argument("--expected-ranks", type=int, default=2)
     parser.add_argument("--nccl-regex", default=r"(?i)(nccl|msccl)")
+    parser.add_argument("--unique-prefix-send-bytes", type=int)
     parser.add_argument("--self-test", action="store_true")
     return parser.parse_args()
 
@@ -813,6 +830,7 @@ def main() -> None:
         args.label,
         args.expected_ranks,
         args.nccl_regex,
+        args.unique_prefix_send_bytes,
     )
     print(json.dumps(result["headline"], indent=2, sort_keys=True))
 
