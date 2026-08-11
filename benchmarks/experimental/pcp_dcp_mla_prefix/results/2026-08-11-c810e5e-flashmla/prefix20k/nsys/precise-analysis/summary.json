@@ -1,0 +1,845 @@
+{
+  "headline": {
+    "full_layer": {
+      "A_ns": 5316103,
+      "C_ns": 2655605,
+      "E_ns": 2655605,
+      "O_ns": 0,
+      "T_ns": 8713305,
+      "attention_comm_kernel_count": 3,
+      "attention_comm_raw_sum_ns": 2655605,
+      "categories": {
+        "context_attention_comm": {
+          "collectives": 1,
+          "kernel_count": 1,
+          "markers": [
+            {
+              "category": "context_attention_comm",
+              "chunk": "0",
+              "collective": "dcp_all_gather",
+              "context_tokens": "41152",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "20576",
+              "rank": "1",
+              "recv_bytes": "23703552",
+              "requests": "2",
+              "send_bytes": "23703552",
+              "width": "576",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 695581,
+          "recv_bytes": 23703552,
+          "send_bytes": 23703552,
+          "union_ns": 695581
+        },
+        "suffix_cache_comm": {
+          "collectives": 2,
+          "kernel_count": 2,
+          "markers": [
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "131072",
+              "send_bytes": "131072",
+              "tensor": "kv_c_normed",
+              "width": "512",
+              "world_size": "2"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "16384",
+              "send_bytes": "16384",
+              "tensor": "k_pe",
+              "width": "64",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 1960024,
+          "recv_bytes": 147456,
+          "send_bytes": 147456,
+          "union_ns": 1960024
+        }
+      },
+      "compute_kernel_count": 28,
+      "compute_raw_sum_ns": 5319367,
+      "exposed_comm_ratio": 0.30477585715179256,
+      "overlap_rate": 0.0,
+      "raw_comm_ratio": 0.30477585715179256,
+      "scope": "full_layer",
+      "scope_kernel_count": 31,
+      "scope_raw_sum_ns": 7974972,
+      "slower_rank": 1
+    },
+    "self_attn": {
+      "A_ns": 5014857,
+      "C_ns": 2655605,
+      "E_ns": 2655605,
+      "O_ns": 0,
+      "T_ns": 8202044,
+      "attention_comm_kernel_count": 3,
+      "attention_comm_raw_sum_ns": 2655605,
+      "categories": {
+        "context_attention_comm": {
+          "collectives": 1,
+          "kernel_count": 1,
+          "markers": [
+            {
+              "category": "context_attention_comm",
+              "chunk": "0",
+              "collective": "dcp_all_gather",
+              "context_tokens": "41152",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "20576",
+              "rank": "1",
+              "recv_bytes": "23703552",
+              "requests": "2",
+              "send_bytes": "23703552",
+              "width": "576",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 695581,
+          "recv_bytes": 23703552,
+          "send_bytes": 23703552,
+          "union_ns": 695581
+        },
+        "suffix_cache_comm": {
+          "collectives": 2,
+          "kernel_count": 2,
+          "markers": [
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "131072",
+              "send_bytes": "131072",
+              "tensor": "kv_c_normed",
+              "width": "512",
+              "world_size": "2"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "16384",
+              "send_bytes": "16384",
+              "tensor": "k_pe",
+              "width": "64",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 1960024,
+          "recv_bytes": 147456,
+          "send_bytes": 147456,
+          "union_ns": 1960024
+        }
+      },
+      "compute_kernel_count": 22,
+      "compute_raw_sum_ns": 5018121,
+      "exposed_comm_ratio": 0.3237735618097147,
+      "overlap_rate": 0.0,
+      "raw_comm_ratio": 0.3237735618097147,
+      "scope": "self_attn",
+      "scope_kernel_count": 25,
+      "scope_raw_sum_ns": 7673726,
+      "slower_rank": 1
+    }
+  },
+  "input": "artifacts/pcp-dcp-flashmla-20260811/prefix20k/nsys/prefix20k_suffix256.sanitized.nsys-rep",
+  "label": "nsys_0",
+  "nccl_regex": "(?i)(nccl|msccl)",
+  "ranks": [
+    {
+      "communication": {
+        "attention_path_comm": {
+          "collectives": 3,
+          "kernel_count": 3,
+          "markers": [
+            {
+              "category": "context_attention_comm",
+              "chunk": "0",
+              "collective": "dcp_all_gather",
+              "context_tokens": "41152",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "20576",
+              "rank": "0",
+              "recv_bytes": "23703552",
+              "requests": "2",
+              "send_bytes": "23703552",
+              "width": "576",
+              "world_size": "2"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "0",
+              "recv_bytes": "131072",
+              "send_bytes": "131072",
+              "tensor": "kv_c_normed",
+              "width": "512",
+              "world_size": "2"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "0",
+              "recv_bytes": "16384",
+              "send_bytes": "16384",
+              "tensor": "k_pe",
+              "width": "64",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 131488,
+          "recv_bytes": 23851008,
+          "send_bytes": 23851008,
+          "union_ns": 131488
+        },
+        "context_attention_comm": {
+          "collectives": 1,
+          "kernel_count": 1,
+          "markers": [
+            {
+              "category": "context_attention_comm",
+              "chunk": "0",
+              "collective": "dcp_all_gather",
+              "context_tokens": "41152",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "20576",
+              "rank": "0",
+              "recv_bytes": "23703552",
+              "requests": "2",
+              "send_bytes": "23703552",
+              "width": "576",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 117696,
+          "recv_bytes": 23703552,
+          "send_bytes": 23703552,
+          "send_only_effective_bandwidth_GBps": 201.39641109298532,
+          "union_ns": 117696,
+          "unique_prefix_send_bytes": 11796480,
+          "unique_prefix_send_only_effective_bandwidth_GBps": 100.22838499184338
+        },
+        "hidden_restore_comm": {
+          "collectives": 1,
+          "kernel_count": 1,
+          "markers": [
+            {
+              "category": "hidden_restore_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "0",
+              "recv_bytes": "1835008",
+              "send_bytes": "1835008",
+              "width": "7168",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 27232,
+          "recv_bytes": 1835008,
+          "send_bytes": 1835008,
+          "union_ns": 27232
+        },
+        "suffix_cache_comm": {
+          "collectives": 2,
+          "kernel_count": 2,
+          "markers": [
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "0",
+              "recv_bytes": "131072",
+              "send_bytes": "131072",
+              "tensor": "kv_c_normed",
+              "width": "512",
+              "world_size": "2"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "0",
+              "recv_bytes": "16384",
+              "send_bytes": "16384",
+              "tensor": "k_pe",
+              "width": "64",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 13792,
+          "recv_bytes": 147456,
+          "send_bytes": 147456,
+          "union_ns": 13792
+        }
+      },
+      "devices": [
+        0
+      ],
+      "pcp_partition": [
+        {
+          "category": "pcp_partition",
+          "computed_tokens": "20480",
+          "iteration": "nsys_0",
+          "local_tokens": "128",
+          "padded_local_tokens": "128",
+          "rank": "0",
+          "scheduled_tokens": "256",
+          "segment_lengths": "64x64",
+          "segment_slices": "0:64,192:256"
+        }
+      ],
+      "rank": 0,
+      "scopes": {
+        "full_layer": {
+          "A_ns": 5323906,
+          "C_ns": 131488,
+          "E_ns": 131488,
+          "O_ns": 0,
+          "T_ns": 7356578,
+          "attention_comm_kernel_count": 3,
+          "attention_comm_raw_sum_ns": 131488,
+          "categories": {
+            "context_attention_comm": {
+              "collectives": 1,
+              "kernel_count": 1,
+              "markers": [
+                {
+                  "category": "context_attention_comm",
+                  "chunk": "0",
+                  "collective": "dcp_all_gather",
+                  "context_tokens": "41152",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "20576",
+                  "rank": "0",
+                  "recv_bytes": "23703552",
+                  "requests": "2",
+                  "send_bytes": "23703552",
+                  "width": "576",
+                  "world_size": "2"
+                }
+              ],
+              "raw_sum_ns": 117696,
+              "recv_bytes": 23703552,
+              "send_bytes": 23703552,
+              "union_ns": 117696
+            },
+            "suffix_cache_comm": {
+              "collectives": 2,
+              "kernel_count": 2,
+              "markers": [
+                {
+                  "category": "suffix_cache_comm",
+                  "collective": "pcp_all_gather",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "128",
+                  "rank": "0",
+                  "recv_bytes": "131072",
+                  "send_bytes": "131072",
+                  "tensor": "kv_c_normed",
+                  "width": "512",
+                  "world_size": "2"
+                },
+                {
+                  "category": "suffix_cache_comm",
+                  "collective": "pcp_all_gather",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "128",
+                  "rank": "0",
+                  "recv_bytes": "16384",
+                  "send_bytes": "16384",
+                  "tensor": "k_pe",
+                  "width": "64",
+                  "world_size": "2"
+                }
+              ],
+              "raw_sum_ns": 13792,
+              "recv_bytes": 147456,
+              "send_bytes": 147456,
+              "union_ns": 13792
+            }
+          },
+          "compute_kernel_count": 28,
+          "compute_raw_sum_ns": 5325602,
+          "exposed_comm_ratio": 0.017873527610255745,
+          "overlap_rate": 0.0,
+          "raw_comm_ratio": 0.017873527610255745,
+          "scope": "full_layer",
+          "scope_kernel_count": 31,
+          "scope_raw_sum_ns": 5457090
+        },
+        "self_attn": {
+          "A_ns": 5023041,
+          "C_ns": 131488,
+          "E_ns": 131488,
+          "O_ns": 0,
+          "T_ns": 6803393,
+          "attention_comm_kernel_count": 3,
+          "attention_comm_raw_sum_ns": 131488,
+          "categories": {
+            "context_attention_comm": {
+              "collectives": 1,
+              "kernel_count": 1,
+              "markers": [
+                {
+                  "category": "context_attention_comm",
+                  "chunk": "0",
+                  "collective": "dcp_all_gather",
+                  "context_tokens": "41152",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "20576",
+                  "rank": "0",
+                  "recv_bytes": "23703552",
+                  "requests": "2",
+                  "send_bytes": "23703552",
+                  "width": "576",
+                  "world_size": "2"
+                }
+              ],
+              "raw_sum_ns": 117696,
+              "recv_bytes": 23703552,
+              "send_bytes": 23703552,
+              "union_ns": 117696
+            },
+            "suffix_cache_comm": {
+              "collectives": 2,
+              "kernel_count": 2,
+              "markers": [
+                {
+                  "category": "suffix_cache_comm",
+                  "collective": "pcp_all_gather",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "128",
+                  "rank": "0",
+                  "recv_bytes": "131072",
+                  "send_bytes": "131072",
+                  "tensor": "kv_c_normed",
+                  "width": "512",
+                  "world_size": "2"
+                },
+                {
+                  "category": "suffix_cache_comm",
+                  "collective": "pcp_all_gather",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "128",
+                  "rank": "0",
+                  "recv_bytes": "16384",
+                  "send_bytes": "16384",
+                  "tensor": "k_pe",
+                  "width": "64",
+                  "world_size": "2"
+                }
+              ],
+              "raw_sum_ns": 13792,
+              "recv_bytes": 147456,
+              "send_bytes": 147456,
+              "union_ns": 13792
+            }
+          },
+          "compute_kernel_count": 22,
+          "compute_raw_sum_ns": 5024737,
+          "exposed_comm_ratio": 0.019326827069963474,
+          "overlap_rate": 0.0,
+          "raw_comm_ratio": 0.019326827069963474,
+          "scope": "self_attn",
+          "scope_kernel_count": 25,
+          "scope_raw_sum_ns": 5156225
+        }
+      }
+    },
+    {
+      "communication": {
+        "attention_path_comm": {
+          "collectives": 3,
+          "kernel_count": 3,
+          "markers": [
+            {
+              "category": "context_attention_comm",
+              "chunk": "0",
+              "collective": "dcp_all_gather",
+              "context_tokens": "41152",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "20576",
+              "rank": "1",
+              "recv_bytes": "23703552",
+              "requests": "2",
+              "send_bytes": "23703552",
+              "width": "576",
+              "world_size": "2"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "131072",
+              "send_bytes": "131072",
+              "tensor": "kv_c_normed",
+              "width": "512",
+              "world_size": "2"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "16384",
+              "send_bytes": "16384",
+              "tensor": "k_pe",
+              "width": "64",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 2655605,
+          "recv_bytes": 23851008,
+          "send_bytes": 23851008,
+          "union_ns": 2655605
+        },
+        "context_attention_comm": {
+          "collectives": 1,
+          "kernel_count": 1,
+          "markers": [
+            {
+              "category": "context_attention_comm",
+              "chunk": "0",
+              "collective": "dcp_all_gather",
+              "context_tokens": "41152",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "20576",
+              "rank": "1",
+              "recv_bytes": "23703552",
+              "requests": "2",
+              "send_bytes": "23703552",
+              "width": "576",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 695581,
+          "recv_bytes": 23703552,
+          "send_bytes": 23703552,
+          "send_only_effective_bandwidth_GBps": 34.07734253810843,
+          "union_ns": 695581,
+          "unique_prefix_send_bytes": 11796480,
+          "unique_prefix_send_only_effective_bandwidth_GBps": 16.959175135606063
+        },
+        "hidden_restore_comm": {
+          "collectives": 1,
+          "kernel_count": 1,
+          "markers": [
+            {
+              "category": "hidden_restore_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "1835008",
+              "send_bytes": "1835008",
+              "width": "7168",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 89376,
+          "recv_bytes": 1835008,
+          "send_bytes": 1835008,
+          "union_ns": 89376
+        },
+        "suffix_cache_comm": {
+          "collectives": 2,
+          "kernel_count": 2,
+          "markers": [
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "131072",
+              "send_bytes": "131072",
+              "tensor": "kv_c_normed",
+              "width": "512",
+              "world_size": "2"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": "2",
+              "iteration": "nsys_0",
+              "local_tokens": "128",
+              "rank": "1",
+              "recv_bytes": "16384",
+              "send_bytes": "16384",
+              "tensor": "k_pe",
+              "width": "64",
+              "world_size": "2"
+            }
+          ],
+          "raw_sum_ns": 1960024,
+          "recv_bytes": 147456,
+          "send_bytes": 147456,
+          "union_ns": 1960024
+        }
+      },
+      "devices": [
+        1
+      ],
+      "pcp_partition": [
+        {
+          "category": "pcp_partition",
+          "computed_tokens": "20480",
+          "iteration": "nsys_0",
+          "local_tokens": "128",
+          "padded_local_tokens": "128",
+          "rank": "1",
+          "scheduled_tokens": "256",
+          "segment_lengths": "64x64",
+          "segment_slices": "64:128,128:192"
+        }
+      ],
+      "rank": 1,
+      "scopes": {
+        "full_layer": {
+          "A_ns": 5316103,
+          "C_ns": 2655605,
+          "E_ns": 2655605,
+          "O_ns": 0,
+          "T_ns": 8713305,
+          "attention_comm_kernel_count": 3,
+          "attention_comm_raw_sum_ns": 2655605,
+          "categories": {
+            "context_attention_comm": {
+              "collectives": 1,
+              "kernel_count": 1,
+              "markers": [
+                {
+                  "category": "context_attention_comm",
+                  "chunk": "0",
+                  "collective": "dcp_all_gather",
+                  "context_tokens": "41152",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "20576",
+                  "rank": "1",
+                  "recv_bytes": "23703552",
+                  "requests": "2",
+                  "send_bytes": "23703552",
+                  "width": "576",
+                  "world_size": "2"
+                }
+              ],
+              "raw_sum_ns": 695581,
+              "recv_bytes": 23703552,
+              "send_bytes": 23703552,
+              "union_ns": 695581
+            },
+            "suffix_cache_comm": {
+              "collectives": 2,
+              "kernel_count": 2,
+              "markers": [
+                {
+                  "category": "suffix_cache_comm",
+                  "collective": "pcp_all_gather",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "128",
+                  "rank": "1",
+                  "recv_bytes": "131072",
+                  "send_bytes": "131072",
+                  "tensor": "kv_c_normed",
+                  "width": "512",
+                  "world_size": "2"
+                },
+                {
+                  "category": "suffix_cache_comm",
+                  "collective": "pcp_all_gather",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "128",
+                  "rank": "1",
+                  "recv_bytes": "16384",
+                  "send_bytes": "16384",
+                  "tensor": "k_pe",
+                  "width": "64",
+                  "world_size": "2"
+                }
+              ],
+              "raw_sum_ns": 1960024,
+              "recv_bytes": 147456,
+              "send_bytes": 147456,
+              "union_ns": 1960024
+            }
+          },
+          "compute_kernel_count": 28,
+          "compute_raw_sum_ns": 5319367,
+          "exposed_comm_ratio": 0.30477585715179256,
+          "overlap_rate": 0.0,
+          "raw_comm_ratio": 0.30477585715179256,
+          "scope": "full_layer",
+          "scope_kernel_count": 31,
+          "scope_raw_sum_ns": 7974972
+        },
+        "self_attn": {
+          "A_ns": 5014857,
+          "C_ns": 2655605,
+          "E_ns": 2655605,
+          "O_ns": 0,
+          "T_ns": 8202044,
+          "attention_comm_kernel_count": 3,
+          "attention_comm_raw_sum_ns": 2655605,
+          "categories": {
+            "context_attention_comm": {
+              "collectives": 1,
+              "kernel_count": 1,
+              "markers": [
+                {
+                  "category": "context_attention_comm",
+                  "chunk": "0",
+                  "collective": "dcp_all_gather",
+                  "context_tokens": "41152",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "20576",
+                  "rank": "1",
+                  "recv_bytes": "23703552",
+                  "requests": "2",
+                  "send_bytes": "23703552",
+                  "width": "576",
+                  "world_size": "2"
+                }
+              ],
+              "raw_sum_ns": 695581,
+              "recv_bytes": 23703552,
+              "send_bytes": 23703552,
+              "union_ns": 695581
+            },
+            "suffix_cache_comm": {
+              "collectives": 2,
+              "kernel_count": 2,
+              "markers": [
+                {
+                  "category": "suffix_cache_comm",
+                  "collective": "pcp_all_gather",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "128",
+                  "rank": "1",
+                  "recv_bytes": "131072",
+                  "send_bytes": "131072",
+                  "tensor": "kv_c_normed",
+                  "width": "512",
+                  "world_size": "2"
+                },
+                {
+                  "category": "suffix_cache_comm",
+                  "collective": "pcp_all_gather",
+                  "dtype": "torch.bfloat16",
+                  "element_size": "2",
+                  "iteration": "nsys_0",
+                  "local_tokens": "128",
+                  "rank": "1",
+                  "recv_bytes": "16384",
+                  "send_bytes": "16384",
+                  "tensor": "k_pe",
+                  "width": "64",
+                  "world_size": "2"
+                }
+              ],
+              "raw_sum_ns": 1960024,
+              "recv_bytes": 147456,
+              "send_bytes": 147456,
+              "union_ns": 1960024
+            }
+          },
+          "compute_kernel_count": 22,
+          "compute_raw_sum_ns": 5018121,
+          "exposed_comm_ratio": 0.3237735618097147,
+          "overlap_rate": 0.0,
+          "raw_comm_ratio": 0.3237735618097147,
+          "scope": "self_attn",
+          "scope_kernel_count": 25,
+          "scope_raw_sum_ns": 7673726
+        }
+      }
+    }
+  ],
+  "sqlite": "artifacts/pcp-dcp-flashmla-20260811/prefix20k/nsys/precise-analysis/prefix20k_suffix256.sanitized.sqlite",
+  "unique_prefix_send_bytes": 11796480
+}

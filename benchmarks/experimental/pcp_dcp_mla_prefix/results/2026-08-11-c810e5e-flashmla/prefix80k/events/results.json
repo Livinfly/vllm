@@ -1,0 +1,1619 @@
+{
+  "event_summary": {
+    "full_layer": {
+      "iterations": [
+        {
+          "label": "measure_0",
+          "max_rank_ms": 22.844127655029297,
+          "rank_ms": {
+            "0": 22.659168243408203,
+            "1": 22.844127655029297
+          }
+        },
+        {
+          "label": "measure_1",
+          "max_rank_ms": 23.343711853027344,
+          "rank_ms": {
+            "0": 23.343711853027344,
+            "1": 22.69273567199707
+          }
+        },
+        {
+          "label": "measure_2",
+          "max_rank_ms": 22.852672576904297,
+          "rank_ms": {
+            "0": 22.55219268798828,
+            "1": 22.852672576904297
+          }
+        }
+      ],
+      "max_rank_mean_ms": 23.013504028320312,
+      "max_rank_p50_ms": 22.852672576904297,
+      "max_rank_p90_ms": 23.245503997802736,
+      "max_rank_stdev_ms": 0.2860002789260433
+    },
+    "self_attn": {
+      "iterations": [
+        {
+          "label": "measure_0",
+          "max_rank_ms": 22.38982391357422,
+          "rank_ms": {
+            "0": 22.20172882080078,
+            "1": 22.38982391357422
+          }
+        },
+        {
+          "label": "measure_1",
+          "max_rank_ms": 22.874208450317383,
+          "rank_ms": {
+            "0": 22.874208450317383,
+            "1": 22.219520568847656
+          }
+        },
+        {
+          "label": "measure_2",
+          "max_rank_ms": 22.39072036743164,
+          "rank_ms": {
+            "0": 22.102048873901367,
+            "1": 22.39072036743164
+          }
+        }
+      ],
+      "max_rank_mean_ms": 22.551584243774414,
+      "max_rank_p50_ms": 22.39072036743164,
+      "max_rank_p90_ms": 22.777510833740234,
+      "max_rank_stdev_ms": 0.279401118274408
+    }
+  },
+  "measured": [
+    {
+      "armed": [
+        {
+          "armed": true,
+          "label": "measure_0",
+          "rank": 0
+        },
+        {
+          "armed": true,
+          "label": "measure_0",
+          "rank": 1
+        }
+      ],
+      "frontend_wall_ms": 58.113918639719486,
+      "label": "measure_0",
+      "profile_validation": [
+        {
+          "context_attention_comm": {
+            "actual_recv_bytes": 94482432,
+            "actual_send_bytes": 94482432,
+            "collective_count": 3,
+            "pcp_chunk_indices": [
+              0,
+              3
+            ],
+            "physical_global_context_rows": 164032,
+            "physical_local_context_rows": 82016,
+            "physical_send_bytes": 94482432,
+            "physical_to_unique_prefix_ratio": 2.00234375,
+            "unique_prefix_send_bytes": 47185920,
+            "virtual_context_tokens": [
+              81920,
+              82112
+            ]
+          },
+          "hidden_restore_comm": {
+            "actual_recv_bytes": 1835008,
+            "actual_send_bytes": 1835008,
+            "collective_count": 1,
+            "expected_send_bytes": 1835008
+          },
+          "local_q_tokens": 128,
+          "rank": 0,
+          "suffix_cache_comm": {
+            "actual_recv_bytes": 147456,
+            "actual_send_bytes": 147456,
+            "collective_count": 2,
+            "expected_send_bytes": 147456
+          }
+        },
+        {
+          "context_attention_comm": {
+            "actual_recv_bytes": 94482432,
+            "actual_send_bytes": 94482432,
+            "collective_count": 3,
+            "pcp_chunk_indices": [
+              1,
+              2
+            ],
+            "physical_global_context_rows": 164032,
+            "physical_local_context_rows": 82016,
+            "physical_send_bytes": 94482432,
+            "physical_to_unique_prefix_ratio": 2.00234375,
+            "unique_prefix_send_bytes": 47185920,
+            "virtual_context_tokens": [
+              81984,
+              82048
+            ]
+          },
+          "hidden_restore_comm": {
+            "actual_recv_bytes": 1835008,
+            "actual_send_bytes": 1835008,
+            "collective_count": 1,
+            "expected_send_bytes": 1835008
+          },
+          "local_q_tokens": 128,
+          "rank": 1,
+          "suffix_cache_comm": {
+            "actual_recv_bytes": 147456,
+            "actual_send_bytes": 147456,
+            "collective_count": 2,
+            "expected_send_bytes": 147456
+          }
+        }
+      ],
+      "profiles": [
+        {
+          "device": 0,
+          "label": "measure_0",
+          "rank": 0,
+          "records": [
+            {
+              "category": "pcp_partition",
+              "elapsed_ms": null,
+              "fields": {
+                "computed_tokens": "81920",
+                "local_tokens": 128,
+                "padded_local_tokens": 128,
+                "scheduled_tokens": "256",
+                "segment_lengths": "64x64",
+                "segment_slices": "0:64,192:256"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=measure_0|rank=0|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=0:64,192:256|scheduled_tokens=256|computed_tokens=81920"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.16790400445461273,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 131072,
+                "send_bytes": 131072,
+                "tensor": "kv_c_normed",
+                "width": 512,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_0|rank=0|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.09628800302743912,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 16384,
+                "send_bytes": 16384,
+                "tensor": "k_pe",
+                "width": 64,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_0|rank=0|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.1757120043039322,
+              "fields": {
+                "chunk": 0,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 1,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_0|rank=0|collective=dcp_all_gather|chunk=0|requests=1|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.17971199750900269,
+              "fields": {
+                "chunk": 1,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 2,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_0|rank=0|collective=dcp_all_gather|chunk=1|requests=2|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.10246399790048599,
+              "fields": {
+                "chunk": 2,
+                "collective": "dcp_all_gather",
+                "context_tokens": 32960,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 16480,
+                "recv_bytes": 18984960,
+                "requests": 1,
+                "send_bytes": 18984960,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_0|rank=0|collective=dcp_all_gather|chunk=2|requests=1|local_tokens=16480|context_tokens=32960|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=18984960|recv_bytes=18984960"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.20172882080078,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": "model.layers.0.self_attn",
+                "local_q_tokens": 128,
+                "scope": "self_attn"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_0|rank=0|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.659168243408203,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": 0,
+                "local_q_tokens": 128,
+                "scope": "full_layer"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_0|rank=0|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "hidden_restore_comm",
+              "elapsed_ms": 0.03200000151991844,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 1835008,
+                "send_bytes": 1835008,
+                "width": 7168,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=measure_0|rank=0|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+            }
+          ]
+        },
+        {
+          "device": 1,
+          "label": "measure_0",
+          "rank": 1,
+          "records": [
+            {
+              "category": "pcp_partition",
+              "elapsed_ms": null,
+              "fields": {
+                "computed_tokens": "81920",
+                "local_tokens": 128,
+                "padded_local_tokens": 128,
+                "scheduled_tokens": "256",
+                "segment_lengths": "64x64",
+                "segment_slices": "64:128,128:192"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=measure_0|rank=1|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=64:128,128:192|scheduled_tokens=256|computed_tokens=81920"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.43171200156211853,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 131072,
+                "send_bytes": 131072,
+                "tensor": "kv_c_normed",
+                "width": 512,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_0|rank=1|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.2155199944972992,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 16384,
+                "send_bytes": 16384,
+                "tensor": "k_pe",
+                "width": 64,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_0|rank=1|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.496832013130188,
+              "fields": {
+                "chunk": 0,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 1,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_0|rank=1|collective=dcp_all_gather|chunk=0|requests=1|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.18812799453735352,
+              "fields": {
+                "chunk": 1,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 2,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_0|rank=1|collective=dcp_all_gather|chunk=1|requests=2|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.1292160004377365,
+              "fields": {
+                "chunk": 2,
+                "collective": "dcp_all_gather",
+                "context_tokens": 32960,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 16480,
+                "recv_bytes": 18984960,
+                "requests": 1,
+                "send_bytes": 18984960,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_0|rank=1|collective=dcp_all_gather|chunk=2|requests=1|local_tokens=16480|context_tokens=32960|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=18984960|recv_bytes=18984960"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.38982391357422,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": "model.layers.0.self_attn",
+                "local_q_tokens": 128,
+                "scope": "self_attn"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_0|rank=1|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.844127655029297,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": 0,
+                "local_q_tokens": 128,
+                "scope": "full_layer"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_0|rank=1|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "hidden_restore_comm",
+              "elapsed_ms": 0.047775998711586,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 1835008,
+                "send_bytes": 1835008,
+                "width": 7168,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=measure_0|rank=1|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+            }
+          ]
+        }
+      ],
+      "request": {
+        "finished": true,
+        "num_cache_creation_tokens": 256,
+        "num_cached_tokens": 81920,
+        "num_computed_prompt_tokens": 256,
+        "prompt_token_sha256_le_u32": "2052861e0c7faa2843fcb7b70240694d830699ba3256de6027935277ddbc0a53",
+        "prompt_tokens": 82176,
+        "request_id": "2",
+        "sampled_token_id": 67783
+      }
+    },
+    {
+      "armed": [
+        {
+          "armed": true,
+          "label": "measure_1",
+          "rank": 0
+        },
+        {
+          "armed": true,
+          "label": "measure_1",
+          "rank": 1
+        }
+      ],
+      "frontend_wall_ms": 56.62159342318773,
+      "label": "measure_1",
+      "profile_validation": [
+        {
+          "context_attention_comm": {
+            "actual_recv_bytes": 94482432,
+            "actual_send_bytes": 94482432,
+            "collective_count": 3,
+            "pcp_chunk_indices": [
+              0,
+              3
+            ],
+            "physical_global_context_rows": 164032,
+            "physical_local_context_rows": 82016,
+            "physical_send_bytes": 94482432,
+            "physical_to_unique_prefix_ratio": 2.00234375,
+            "unique_prefix_send_bytes": 47185920,
+            "virtual_context_tokens": [
+              81920,
+              82112
+            ]
+          },
+          "hidden_restore_comm": {
+            "actual_recv_bytes": 1835008,
+            "actual_send_bytes": 1835008,
+            "collective_count": 1,
+            "expected_send_bytes": 1835008
+          },
+          "local_q_tokens": 128,
+          "rank": 0,
+          "suffix_cache_comm": {
+            "actual_recv_bytes": 147456,
+            "actual_send_bytes": 147456,
+            "collective_count": 2,
+            "expected_send_bytes": 147456
+          }
+        },
+        {
+          "context_attention_comm": {
+            "actual_recv_bytes": 94482432,
+            "actual_send_bytes": 94482432,
+            "collective_count": 3,
+            "pcp_chunk_indices": [
+              1,
+              2
+            ],
+            "physical_global_context_rows": 164032,
+            "physical_local_context_rows": 82016,
+            "physical_send_bytes": 94482432,
+            "physical_to_unique_prefix_ratio": 2.00234375,
+            "unique_prefix_send_bytes": 47185920,
+            "virtual_context_tokens": [
+              81984,
+              82048
+            ]
+          },
+          "hidden_restore_comm": {
+            "actual_recv_bytes": 1835008,
+            "actual_send_bytes": 1835008,
+            "collective_count": 1,
+            "expected_send_bytes": 1835008
+          },
+          "local_q_tokens": 128,
+          "rank": 1,
+          "suffix_cache_comm": {
+            "actual_recv_bytes": 147456,
+            "actual_send_bytes": 147456,
+            "collective_count": 2,
+            "expected_send_bytes": 147456
+          }
+        }
+      ],
+      "profiles": [
+        {
+          "device": 0,
+          "label": "measure_1",
+          "rank": 0,
+          "records": [
+            {
+              "category": "pcp_partition",
+              "elapsed_ms": null,
+              "fields": {
+                "computed_tokens": "81920",
+                "local_tokens": 128,
+                "padded_local_tokens": 128,
+                "scheduled_tokens": "256",
+                "segment_lengths": "64x64",
+                "segment_slices": "0:64,192:256"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=measure_1|rank=0|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=0:64,192:256|scheduled_tokens=256|computed_tokens=81920"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.9029759764671326,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 131072,
+                "send_bytes": 131072,
+                "tensor": "kv_c_normed",
+                "width": 512,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_1|rank=0|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.20428800582885742,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 16384,
+                "send_bytes": 16384,
+                "tensor": "k_pe",
+                "width": 64,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_1|rank=0|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.5717759728431702,
+              "fields": {
+                "chunk": 0,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 1,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_1|rank=0|collective=dcp_all_gather|chunk=0|requests=1|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.17827199399471283,
+              "fields": {
+                "chunk": 1,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 2,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_1|rank=0|collective=dcp_all_gather|chunk=1|requests=2|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.106175996363163,
+              "fields": {
+                "chunk": 2,
+                "collective": "dcp_all_gather",
+                "context_tokens": 32960,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 16480,
+                "recv_bytes": 18984960,
+                "requests": 1,
+                "send_bytes": 18984960,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_1|rank=0|collective=dcp_all_gather|chunk=2|requests=1|local_tokens=16480|context_tokens=32960|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=18984960|recv_bytes=18984960"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.874208450317383,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": "model.layers.0.self_attn",
+                "local_q_tokens": 128,
+                "scope": "self_attn"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_1|rank=0|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 23.343711853027344,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": 0,
+                "local_q_tokens": 128,
+                "scope": "full_layer"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_1|rank=0|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "hidden_restore_comm",
+              "elapsed_ms": 0.031168000772595406,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 1835008,
+                "send_bytes": 1835008,
+                "width": 7168,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=measure_1|rank=0|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+            }
+          ]
+        },
+        {
+          "device": 1,
+          "label": "measure_1",
+          "rank": 1,
+          "records": [
+            {
+              "category": "pcp_partition",
+              "elapsed_ms": null,
+              "fields": {
+                "computed_tokens": "81920",
+                "local_tokens": 128,
+                "padded_local_tokens": 128,
+                "scheduled_tokens": "256",
+                "segment_lengths": "64x64",
+                "segment_slices": "64:128,128:192"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=measure_1|rank=1|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=64:128,128:192|scheduled_tokens=256|computed_tokens=81920"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.17603200674057007,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 131072,
+                "send_bytes": 131072,
+                "tensor": "kv_c_normed",
+                "width": 512,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_1|rank=1|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.09193599969148636,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 16384,
+                "send_bytes": 16384,
+                "tensor": "k_pe",
+                "width": 64,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_1|rank=1|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.17440000176429749,
+              "fields": {
+                "chunk": 0,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 1,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_1|rank=1|collective=dcp_all_gather|chunk=0|requests=1|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.18163199722766876,
+              "fields": {
+                "chunk": 1,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 2,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_1|rank=1|collective=dcp_all_gather|chunk=1|requests=2|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.11311999708414078,
+              "fields": {
+                "chunk": 2,
+                "collective": "dcp_all_gather",
+                "context_tokens": 32960,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 16480,
+                "recv_bytes": 18984960,
+                "requests": 1,
+                "send_bytes": 18984960,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_1|rank=1|collective=dcp_all_gather|chunk=2|requests=1|local_tokens=16480|context_tokens=32960|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=18984960|recv_bytes=18984960"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.219520568847656,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": "model.layers.0.self_attn",
+                "local_q_tokens": 128,
+                "scope": "self_attn"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_1|rank=1|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.69273567199707,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": 0,
+                "local_q_tokens": 128,
+                "scope": "full_layer"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_1|rank=1|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "hidden_restore_comm",
+              "elapsed_ms": 0.04297599941492081,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 1835008,
+                "send_bytes": 1835008,
+                "width": 7168,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=measure_1|rank=1|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+            }
+          ]
+        }
+      ],
+      "request": {
+        "finished": true,
+        "num_cache_creation_tokens": 256,
+        "num_cached_tokens": 81920,
+        "num_computed_prompt_tokens": 256,
+        "prompt_token_sha256_le_u32": "c87815225cd992b8787173c6a0507e44c582bebc6edb1da1902b9d6eba1649e2",
+        "prompt_tokens": 82176,
+        "request_id": "3",
+        "sampled_token_id": 47939
+      }
+    },
+    {
+      "armed": [
+        {
+          "armed": true,
+          "label": "measure_2",
+          "rank": 0
+        },
+        {
+          "armed": true,
+          "label": "measure_2",
+          "rank": 1
+        }
+      ],
+      "frontend_wall_ms": 59.055219404399395,
+      "label": "measure_2",
+      "profile_validation": [
+        {
+          "context_attention_comm": {
+            "actual_recv_bytes": 94482432,
+            "actual_send_bytes": 94482432,
+            "collective_count": 3,
+            "pcp_chunk_indices": [
+              0,
+              3
+            ],
+            "physical_global_context_rows": 164032,
+            "physical_local_context_rows": 82016,
+            "physical_send_bytes": 94482432,
+            "physical_to_unique_prefix_ratio": 2.00234375,
+            "unique_prefix_send_bytes": 47185920,
+            "virtual_context_tokens": [
+              81920,
+              82112
+            ]
+          },
+          "hidden_restore_comm": {
+            "actual_recv_bytes": 1835008,
+            "actual_send_bytes": 1835008,
+            "collective_count": 1,
+            "expected_send_bytes": 1835008
+          },
+          "local_q_tokens": 128,
+          "rank": 0,
+          "suffix_cache_comm": {
+            "actual_recv_bytes": 147456,
+            "actual_send_bytes": 147456,
+            "collective_count": 2,
+            "expected_send_bytes": 147456
+          }
+        },
+        {
+          "context_attention_comm": {
+            "actual_recv_bytes": 94482432,
+            "actual_send_bytes": 94482432,
+            "collective_count": 3,
+            "pcp_chunk_indices": [
+              1,
+              2
+            ],
+            "physical_global_context_rows": 164032,
+            "physical_local_context_rows": 82016,
+            "physical_send_bytes": 94482432,
+            "physical_to_unique_prefix_ratio": 2.00234375,
+            "unique_prefix_send_bytes": 47185920,
+            "virtual_context_tokens": [
+              81984,
+              82048
+            ]
+          },
+          "hidden_restore_comm": {
+            "actual_recv_bytes": 1835008,
+            "actual_send_bytes": 1835008,
+            "collective_count": 1,
+            "expected_send_bytes": 1835008
+          },
+          "local_q_tokens": 128,
+          "rank": 1,
+          "suffix_cache_comm": {
+            "actual_recv_bytes": 147456,
+            "actual_send_bytes": 147456,
+            "collective_count": 2,
+            "expected_send_bytes": 147456
+          }
+        }
+      ],
+      "profiles": [
+        {
+          "device": 0,
+          "label": "measure_2",
+          "rank": 0,
+          "records": [
+            {
+              "category": "pcp_partition",
+              "elapsed_ms": null,
+              "fields": {
+                "computed_tokens": "81920",
+                "local_tokens": 128,
+                "padded_local_tokens": 128,
+                "scheduled_tokens": "256",
+                "segment_lengths": "64x64",
+                "segment_slices": "0:64,192:256"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=measure_2|rank=0|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=0:64,192:256|scheduled_tokens=256|computed_tokens=81920"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.15849600732326508,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 131072,
+                "send_bytes": 131072,
+                "tensor": "kv_c_normed",
+                "width": 512,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_2|rank=0|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.0960640013217926,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 16384,
+                "send_bytes": 16384,
+                "tensor": "k_pe",
+                "width": 64,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_2|rank=0|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.1769919991493225,
+              "fields": {
+                "chunk": 0,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 1,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_2|rank=0|collective=dcp_all_gather|chunk=0|requests=1|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.17849600315093994,
+              "fields": {
+                "chunk": 1,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 2,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_2|rank=0|collective=dcp_all_gather|chunk=1|requests=2|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.10502400249242783,
+              "fields": {
+                "chunk": 2,
+                "collective": "dcp_all_gather",
+                "context_tokens": 32960,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 16480,
+                "recv_bytes": 18984960,
+                "requests": 1,
+                "send_bytes": 18984960,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_2|rank=0|collective=dcp_all_gather|chunk=2|requests=1|local_tokens=16480|context_tokens=32960|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=18984960|recv_bytes=18984960"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.102048873901367,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": "model.layers.0.self_attn",
+                "local_q_tokens": 128,
+                "scope": "self_attn"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_2|rank=0|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.55219268798828,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": 0,
+                "local_q_tokens": 128,
+                "scope": "full_layer"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_2|rank=0|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "hidden_restore_comm",
+              "elapsed_ms": 0.03152000159025192,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 1835008,
+                "send_bytes": 1835008,
+                "width": 7168,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=measure_2|rank=0|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+            }
+          ]
+        },
+        {
+          "device": 1,
+          "label": "measure_2",
+          "rank": 1,
+          "records": [
+            {
+              "category": "pcp_partition",
+              "elapsed_ms": null,
+              "fields": {
+                "computed_tokens": "81920",
+                "local_tokens": 128,
+                "padded_local_tokens": 128,
+                "scheduled_tokens": "256",
+                "segment_lengths": "64x64",
+                "segment_slices": "64:128,128:192"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=measure_2|rank=1|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=64:128,128:192|scheduled_tokens=256|computed_tokens=81920"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.42953601479530334,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 131072,
+                "send_bytes": 131072,
+                "tensor": "kv_c_normed",
+                "width": 512,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_2|rank=1|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.20393599569797516,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 16384,
+                "send_bytes": 16384,
+                "tensor": "k_pe",
+                "width": 64,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=measure_2|rank=1|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.44947201013565063,
+              "fields": {
+                "chunk": 0,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 1,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_2|rank=1|collective=dcp_all_gather|chunk=0|requests=1|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.1825920045375824,
+              "fields": {
+                "chunk": 1,
+                "collective": "dcp_all_gather",
+                "context_tokens": 65536,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 32768,
+                "recv_bytes": 37748736,
+                "requests": 2,
+                "send_bytes": 37748736,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_2|rank=1|collective=dcp_all_gather|chunk=1|requests=2|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.1483840048313141,
+              "fields": {
+                "chunk": 2,
+                "collective": "dcp_all_gather",
+                "context_tokens": 32960,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 16480,
+                "recv_bytes": 18984960,
+                "requests": 1,
+                "send_bytes": 18984960,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=measure_2|rank=1|collective=dcp_all_gather|chunk=2|requests=1|local_tokens=16480|context_tokens=32960|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=18984960|recv_bytes=18984960"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.39072036743164,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": "model.layers.0.self_attn",
+                "local_q_tokens": 128,
+                "scope": "self_attn"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_2|rank=1|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 22.852672576904297,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": 0,
+                "local_q_tokens": 128,
+                "scope": "full_layer"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=measure_2|rank=1|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "hidden_restore_comm",
+              "elapsed_ms": 0.04560000076889992,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 1835008,
+                "send_bytes": 1835008,
+                "width": 7168,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=measure_2|rank=1|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+            }
+          ]
+        }
+      ],
+      "request": {
+        "finished": true,
+        "num_cache_creation_tokens": 256,
+        "num_cached_tokens": 81920,
+        "num_computed_prompt_tokens": 256,
+        "prompt_token_sha256_le_u32": "7b80ab6d87dc1ae8d58c4d4573efdcac016a35cdc4dc613fcee4ffe3280f5abd",
+        "prompt_tokens": 82176,
+        "request_id": "4",
+        "sampled_token_id": 87874
+      }
+    }
+  ],
+  "prime": {
+    "frontend_wall_ms": 857.7084075659513,
+    "request": {
+      "finished": true,
+      "num_cache_creation_tokens": 81920,
+      "num_cached_tokens": 0,
+      "num_computed_prompt_tokens": 81920,
+      "prompt_token_sha256_le_u32": "75471f48427567ae6bd7c56b3a48c8c07cfc5eed29883046eb9bb20b1fe4cfc5",
+      "prompt_tokens": 81920,
+      "request_id": "0",
+      "sampled_token_id": 4143
+    }
+  },
+  "warmup": {
+    "armed": [
+      {
+        "armed": true,
+        "label": "warmup_0",
+        "rank": 0
+      },
+      {
+        "armed": true,
+        "label": "warmup_0",
+        "rank": 1
+      }
+    ],
+    "frontend_wall_ms": 75.76620113104582,
+    "label": "warmup_0",
+    "profile_validation": [
+      {
+        "context_attention_comm": {
+          "actual_recv_bytes": 94482432,
+          "actual_send_bytes": 94482432,
+          "collective_count": 3,
+          "pcp_chunk_indices": [
+            0,
+            3
+          ],
+          "physical_global_context_rows": 164032,
+          "physical_local_context_rows": 82016,
+          "physical_send_bytes": 94482432,
+          "physical_to_unique_prefix_ratio": 2.00234375,
+          "unique_prefix_send_bytes": 47185920,
+          "virtual_context_tokens": [
+            81920,
+            82112
+          ]
+        },
+        "hidden_restore_comm": {
+          "actual_recv_bytes": 1835008,
+          "actual_send_bytes": 1835008,
+          "collective_count": 1,
+          "expected_send_bytes": 1835008
+        },
+        "local_q_tokens": 128,
+        "rank": 0,
+        "suffix_cache_comm": {
+          "actual_recv_bytes": 147456,
+          "actual_send_bytes": 147456,
+          "collective_count": 2,
+          "expected_send_bytes": 147456
+        }
+      },
+      {
+        "context_attention_comm": {
+          "actual_recv_bytes": 94482432,
+          "actual_send_bytes": 94482432,
+          "collective_count": 3,
+          "pcp_chunk_indices": [
+            1,
+            2
+          ],
+          "physical_global_context_rows": 164032,
+          "physical_local_context_rows": 82016,
+          "physical_send_bytes": 94482432,
+          "physical_to_unique_prefix_ratio": 2.00234375,
+          "unique_prefix_send_bytes": 47185920,
+          "virtual_context_tokens": [
+            81984,
+            82048
+          ]
+        },
+        "hidden_restore_comm": {
+          "actual_recv_bytes": 1835008,
+          "actual_send_bytes": 1835008,
+          "collective_count": 1,
+          "expected_send_bytes": 1835008
+        },
+        "local_q_tokens": 128,
+        "rank": 1,
+        "suffix_cache_comm": {
+          "actual_recv_bytes": 147456,
+          "actual_send_bytes": 147456,
+          "collective_count": 2,
+          "expected_send_bytes": 147456
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "device": 0,
+        "label": "warmup_0",
+        "rank": 0,
+        "records": [
+          {
+            "category": "pcp_partition",
+            "elapsed_ms": null,
+            "fields": {
+              "computed_tokens": "81920",
+              "local_tokens": 128,
+              "padded_local_tokens": 128,
+              "scheduled_tokens": "256",
+              "segment_lengths": "64x64",
+              "segment_slices": "0:64,192:256"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=warmup_0|rank=0|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=0:64,192:256|scheduled_tokens=256|computed_tokens=81920"
+          },
+          {
+            "category": "suffix_cache_comm",
+            "elapsed_ms": 0.18953600525856018,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 131072,
+              "send_bytes": 131072,
+              "tensor": "kv_c_normed",
+              "width": 512,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=warmup_0|rank=0|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+          },
+          {
+            "category": "suffix_cache_comm",
+            "elapsed_ms": 0.10982400178909302,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 16384,
+              "send_bytes": 16384,
+              "tensor": "k_pe",
+              "width": 64,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=warmup_0|rank=0|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+          },
+          {
+            "category": "context_attention_comm",
+            "elapsed_ms": 0.17417599260807037,
+            "fields": {
+              "chunk": 0,
+              "collective": "dcp_all_gather",
+              "context_tokens": 65536,
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 32768,
+              "recv_bytes": 37748736,
+              "requests": 1,
+              "send_bytes": 37748736,
+              "width": 576,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=warmup_0|rank=0|collective=dcp_all_gather|chunk=0|requests=1|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+          },
+          {
+            "category": "context_attention_comm",
+            "elapsed_ms": 0.17894400656223297,
+            "fields": {
+              "chunk": 1,
+              "collective": "dcp_all_gather",
+              "context_tokens": 65536,
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 32768,
+              "recv_bytes": 37748736,
+              "requests": 2,
+              "send_bytes": 37748736,
+              "width": 576,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=warmup_0|rank=0|collective=dcp_all_gather|chunk=1|requests=2|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+          },
+          {
+            "category": "context_attention_comm",
+            "elapsed_ms": 0.10387200117111206,
+            "fields": {
+              "chunk": 2,
+              "collective": "dcp_all_gather",
+              "context_tokens": 32960,
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 16480,
+              "recv_bytes": 18984960,
+              "requests": 1,
+              "send_bytes": 18984960,
+              "width": 576,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=warmup_0|rank=0|collective=dcp_all_gather|chunk=2|requests=1|local_tokens=16480|context_tokens=32960|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=18984960|recv_bytes=18984960"
+          },
+          {
+            "category": "scope",
+            "elapsed_ms": 31.96099281311035,
+            "fields": {
+              "activation_dtype": "torch.bfloat16",
+              "layer": "model.layers.0.self_attn",
+              "local_q_tokens": 128,
+              "scope": "self_attn"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=warmup_0|rank=0|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+          },
+          {
+            "category": "scope",
+            "elapsed_ms": 36.43267059326172,
+            "fields": {
+              "activation_dtype": "torch.bfloat16",
+              "layer": 0,
+              "local_q_tokens": 128,
+              "scope": "full_layer"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=warmup_0|rank=0|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+          },
+          {
+            "category": "hidden_restore_comm",
+            "elapsed_ms": 0.5652480125427246,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 1835008,
+              "send_bytes": 1835008,
+              "width": 7168,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=warmup_0|rank=0|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+          }
+        ]
+      },
+      {
+        "device": 1,
+        "label": "warmup_0",
+        "rank": 1,
+        "records": [
+          {
+            "category": "pcp_partition",
+            "elapsed_ms": null,
+            "fields": {
+              "computed_tokens": "81920",
+              "local_tokens": 128,
+              "padded_local_tokens": 128,
+              "scheduled_tokens": "256",
+              "segment_lengths": "64x64",
+              "segment_slices": "64:128,128:192"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=warmup_0|rank=1|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=64:128,128:192|scheduled_tokens=256|computed_tokens=81920"
+          },
+          {
+            "category": "suffix_cache_comm",
+            "elapsed_ms": 0.7223680019378662,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 131072,
+              "send_bytes": 131072,
+              "tensor": "kv_c_normed",
+              "width": 512,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=warmup_0|rank=1|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+          },
+          {
+            "category": "suffix_cache_comm",
+            "elapsed_ms": 0.2503359913825989,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 16384,
+              "send_bytes": 16384,
+              "tensor": "k_pe",
+              "width": 64,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=warmup_0|rank=1|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+          },
+          {
+            "category": "context_attention_comm",
+            "elapsed_ms": 0.6773120164871216,
+            "fields": {
+              "chunk": 0,
+              "collective": "dcp_all_gather",
+              "context_tokens": 65536,
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 32768,
+              "recv_bytes": 37748736,
+              "requests": 1,
+              "send_bytes": 37748736,
+              "width": 576,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=warmup_0|rank=1|collective=dcp_all_gather|chunk=0|requests=1|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+          },
+          {
+            "category": "context_attention_comm",
+            "elapsed_ms": 0.22617599368095398,
+            "fields": {
+              "chunk": 1,
+              "collective": "dcp_all_gather",
+              "context_tokens": 65536,
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 32768,
+              "recv_bytes": 37748736,
+              "requests": 2,
+              "send_bytes": 37748736,
+              "width": 576,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=warmup_0|rank=1|collective=dcp_all_gather|chunk=1|requests=2|local_tokens=32768|context_tokens=65536|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=37748736|recv_bytes=37748736"
+          },
+          {
+            "category": "context_attention_comm",
+            "elapsed_ms": 0.16038399934768677,
+            "fields": {
+              "chunk": 2,
+              "collective": "dcp_all_gather",
+              "context_tokens": 32960,
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 16480,
+              "recv_bytes": 18984960,
+              "requests": 1,
+              "send_bytes": 18984960,
+              "width": 576,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=warmup_0|rank=1|collective=dcp_all_gather|chunk=2|requests=1|local_tokens=16480|context_tokens=32960|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=18984960|recv_bytes=18984960"
+          },
+          {
+            "category": "scope",
+            "elapsed_ms": 32.22684860229492,
+            "fields": {
+              "activation_dtype": "torch.bfloat16",
+              "layer": "model.layers.0.self_attn",
+              "local_q_tokens": 128,
+              "scope": "self_attn"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=warmup_0|rank=1|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+          },
+          {
+            "category": "scope",
+            "elapsed_ms": 36.62627029418945,
+            "fields": {
+              "activation_dtype": "torch.bfloat16",
+              "layer": 0,
+              "local_q_tokens": 128,
+              "scope": "full_layer"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=warmup_0|rank=1|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+          },
+          {
+            "category": "hidden_restore_comm",
+            "elapsed_ms": 0.8163520097732544,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 1835008,
+              "send_bytes": 1835008,
+              "width": 7168,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=warmup_0|rank=1|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+          }
+        ]
+      }
+    ],
+    "request": {
+      "finished": true,
+      "num_cache_creation_tokens": 256,
+      "num_cached_tokens": 81920,
+      "num_computed_prompt_tokens": 256,
+      "prompt_token_sha256_le_u32": "2dc74899268bf8b2b4780a0d79e46fb83ae46c100dcc5001e9e4309878463270",
+      "prompt_tokens": 82176,
+      "request_id": "1",
+      "sampled_token_id": 105264
+    }
+  }
+}

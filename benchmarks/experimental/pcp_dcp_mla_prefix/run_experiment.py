@@ -22,6 +22,9 @@ from typing import Any
 
 os.environ.setdefault("PCP_DCP_MLA_PROFILE", "1")
 os.environ.setdefault("VLLM_NVTX_SCOPES_FOR_PROFILING", "1")
+os.environ["PATH"] = os.pathsep.join(
+    (str(Path(sys.executable).parent), os.environ.get("PATH", ""))
+)
 
 CONTRACT_PREFIX_TOKENS = 81_920
 SMOKE_PREFIX_TOKENS = 1_024
@@ -261,9 +264,9 @@ def _validate_worker_metadata(
             backend["outer_backend"] != expect_outer_backend
         ):
             raise RuntimeError(
-                "Automatic backend selection did not meet the experiment contract: "
+                "Attention backend selection did not meet the experiment contract: "
                 f"expected {expect_outer_backend}, got {backend['outer_backend']}. "
-                "Do not force a replacement silently; record and resolve the mismatch."
+                "Record and resolve the mismatch before accepting the run."
             )
 
 
@@ -519,7 +522,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.20)
-    parser.add_argument("--expect-outer-backend", default="FLASH_ATTN_MLA")
+    parser.add_argument("--attention-backend", default="FLASHMLA")
+    parser.add_argument("--expect-outer-backend", default="FLASHMLA")
     parser.add_argument("--allow-non-contract-shape", action="store_true")
     parser.add_argument("--expected-git-sha", default=EXPECTED_GIT_SHA)
     return parser.parse_args()
@@ -562,7 +566,7 @@ def main() -> None:
         "weight_format": "dummy unquantized BF16",
         "activation_dtype": "bfloat16",
         "kv_cache_dtype": "bfloat16",
-        "attention_backend_request": "auto",
+        "attention_backend_request": args.attention_backend,
         "mla_prefill_backend_request": "auto",
         "expected_outer_backend": args.expect_outer_backend,
         "repository_requirement": repository_evidence,
@@ -599,7 +603,7 @@ def main() -> None:
         "enforce_eager": True,
         "compilation_config": {"cudagraph_mode": "NONE"},
         "enable_layerwise_nvtx_tracing": True,
-        "attention_config": {"backend": "auto"},
+        "attention_config": {"backend": args.attention_backend},
         "disable_log_stats": False,
         "seed": args.seed,
     }

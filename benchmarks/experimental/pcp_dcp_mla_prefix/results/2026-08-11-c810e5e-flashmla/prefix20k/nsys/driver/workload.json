@@ -1,0 +1,16 @@
+{
+  "prefix_sha256_le_u32": "fb8365ab80a0f811eabb3a4a3c3cfabac1ff8844488b5e8c0749674eebdd508a",
+  "prefix_tokens": 20480,
+  "suffixes": {
+    "nsys_0": {
+      "first_token": 29709,
+      "sha256_le_u32": "587f8a1d99544e9d9204a2bce22d7aae1371a8908cd5c1731cfa2a071303a12a",
+      "tokens": 256
+    },
+    "warmup_0": {
+      "first_token": 10309,
+      "sha256_le_u32": "b2148cec3fbe8a305f9982454f178887156adfa5578f49f55123ab4e51320daa",
+      "tokens": 256
+    }
+  }
+}

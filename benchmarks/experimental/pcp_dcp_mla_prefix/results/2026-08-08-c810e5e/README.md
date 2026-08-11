@@ -175,29 +175,39 @@ Ordinary run:
 
 The final nsys capture used the repository launcher and removed credential-like
 variables from the target process environment. The equivalent current launcher
-invocation is:
+invocation explicitly restores this run's automatic backend selection:
 
 ```bash
-ALLOW_NSYS_ENV_CAPTURE=1 MODE=nsys \
+MODE=nsys \
   RUN_DIR=artifacts/pcp-dcp-nsys-80k-sanitized \
-  bash benchmarks/experimental/pcp_dcp_mla_prefix/run_nsys.sh
+  bash benchmarks/experimental/pcp_dcp_mla_prefix/run_nsys.sh \
+  --attention-backend auto --expect-outer-backend FLASH_ATTN_MLA
 ```
 
-The explicit opt-in is required because the installed nsys 2025.1.1 lacks
-`--discard-environment`. A current nsys that supports that option does not need
-the opt-in. Use `DRY_RUN=1` to print the fully resolved command before launch.
+The current launcher starts nsys with a minimal environment and emits a
+sanitized report because the installed nsys 2025.1.1 lacks
+`--discard-environment`. Use `DRY_RUN=1` to print the fully resolved command
+before launch.
 
-Re-run precise analysis directly from the committed portable trace:
+Re-run precise analysis directly from the committed sanitized report:
 
 ```bash
 .venv/bin/python \
   benchmarks/experimental/pcp_dcp_mla_prefix/analyze_nsys.py \
   --input benchmarks/experimental/pcp_dcp_mla_prefix/results/\
-2026-08-08-c810e5e/nsys/precise-analysis/\
-prefix80k_suffix256.portable.sqlite \
+2026-08-08-c810e5e/nsys/prefix80k_suffix256.sanitized.nsys-rep \
   --output-dir artifacts/pcp-dcp-reanalysis \
   --label nsys_0 --unique-prefix-send-bytes 47185920
 ```
+
+The equal-length sanitized report is
+[nsys/prefix80k_suffix256.sanitized.nsys-rep](nsys/prefix80k_suffix256.sanitized.nsys-rep),
+with SHA-256
+`c1331cda453ff2ac55531b648024a11f6babe9ed78b5e85f1cdfc40ae996e4bf`.
+Its [redaction manifest](nsys/prefix80k_suffix256.redaction.json) records the
+raw source SHA-256 and the four credential-like environment values replaced by
+same-length asterisks. Nsight Systems can export the sanitized report, and
+reanalysis reproduces the checked-in summary exactly.
 
 The portable SQLite is
 [nsys/precise-analysis/prefix80k_suffix256.portable.sqlite](nsys/precise-analysis/prefix80k_suffix256.portable.sqlite),
@@ -205,13 +215,11 @@ with SHA-256
 `6091775e615a9c599a5ad263d21c811a0c5295e1fdfb8971b3330d4b09ed1996`.
 It records the local source report SHA-256
 `dbf19bda6437cc6583ae679df959ec2b1a151f5c7f2ac37d7110249fdc222a29`
-in its metadata table. The source report remains in local `artifacts/` because
-nsys 2025.1.1 retained a host credential value even though the target process
-environment was scrubbed. It was deliberately excluded from Git history. The
-portable database contains only the 18 experiment NVTX markers, 686 CUDA
-runtime rows, 178 GPU kernel rows, and the 86 kernel/runtime names they use;
-reanalysis reproduces the checked-in summary exactly. Raw GPU trace CSVs are
-also retained for independent inspection.
+in its metadata table. That hash identifies the unsafe local raw report, which
+remains excluded from Git history. The portable database contains only the 18
+experiment NVTX markers, 686 CUDA runtime rows, 178 GPU kernel rows, and the 86
+kernel/runtime names they use. Raw GPU trace CSVs are also retained for
+independent inspection.
 
 The nsys driver `results.json` SHA-256 is
 `10b5a52b118e222a1fe88d608d5d076dc97528407c37a1da8c4a813ff3aa35b0`.
@@ -229,8 +237,9 @@ The ordinary `results.json` SHA-256 is
   anticipated FlashMLA path.
 - Three ordinary repetitions characterize short-run stability but not tails.
 - NCCL timeline exposure does not prove equivalent end-to-end causal delay.
-- The original `.nsys-rep` cannot be published safely with nsys 2025.1.1 on
-  this node. The allowlisted portable SQLite preserves every field consumed by
-  the analyzer, but not unrelated Nsight process/host metadata or GUI features.
+- The unsanitized original `.nsys-rep` cannot be published safely with nsys
+  2025.1.1 on this node. The committed equal-length sanitized report retains
+  the Nsight report structure while replacing captured credential-like values;
+  the allowlisted portable SQLite remains the smallest analyzer-only artifact.
 - The coarse `gputrc2graph.py` output is retained only as a sanity check; the
   reported communication ratios come from the rank-aware NVTX analyzer.

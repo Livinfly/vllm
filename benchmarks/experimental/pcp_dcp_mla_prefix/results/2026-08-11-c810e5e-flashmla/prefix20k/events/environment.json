@@ -1,0 +1,102 @@
+{
+  "argv": [
+    "benchmarks/experimental/pcp_dcp_mla_prefix/run_experiment.py",
+    "--mode",
+    "events",
+    "--prefix-tokens",
+    "20480",
+    "--allow-non-contract-shape",
+    "--output-dir",
+    "artifacts/pcp-dcp-flashmla-20260811/prefix20k/events"
+  ],
+  "commands": {
+    "nsys": {
+      "command": [
+        "nsys",
+        "--version"
+      ],
+      "returncode": 127,
+      "stderr": "[Errno 2] No such file or directory: 'nsys'"
+    },
+    "nvcc": {
+      "command": [
+        "nvcc",
+        "--version"
+      ],
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:23:50_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0"
+    },
+    "nvidia_smi": {
+      "command": [
+        "nvidia-smi"
+      ],
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "Tue Aug 11 02:34:10 2026       \n+-----------------------------------------------------------------------------------------+\n| NVIDIA-SMI 570.195.03             Driver Version: 570.195.03     CUDA Version: 12.8     |\n|-----------------------------------------+------------------------+----------------------+\n| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |\n| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |\n|                                         |                        |               MIG M. |\n|=========================================+========================+======================|\n|   0  NVIDIA H100 80GB HBM3          On  |   00000000:9D:00.0 Off |                    0 |\n| N/A   37C    P0             73W /  700W |       0MiB /  81559MiB |      0%      Default |\n|                                         |                        |             Disabled |\n+-----------------------------------------+------------------------+----------------------+\n|   1  NVIDIA H100 80GB HBM3          On  |   00000000:DF:00.0 Off |                    0 |\n| N/A   22C    P0             68W /  700W |       0MiB /  81559MiB |      0%      Default |\n|                                         |                        |             Disabled |\n+-----------------------------------------+------------------------+----------------------+\n                                                                                         \n+-----------------------------------------------------------------------------------------+\n| Processes:                                                                              |\n|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |\n|        ID   ID                                                               Usage      |\n|=========================================================================================|\n|  No running processes found                                                             |\n+-----------------------------------------------------------------------------------------+"
+    },
+    "nvidia_smi_clocks_power": {
+      "command": [
+        "nvidia-smi",
+        "--query-gpu=index,name,uuid,pci.bus_id,driver_version,pstate,clocks.sm,clocks.mem,power.draw,power.limit,memory.total",
+        "--format=csv,noheader,nounits"
+      ],
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "0, NVIDIA H100 80GB HBM3, GPU-82289131-9718-f7c8-9041-8164afa93dde, 00000000:9D:00.0, 570.195.03, P0, 345, 2619, 73.07, 700.00, 81559\n1, NVIDIA H100 80GB HBM3, GPU-a00ffb72-e4c0-945d-adf3-5570edad0bf8, 00000000:DF:00.0, 570.195.03, P0, 345, 2619, 68.63, 700.00, 81559"
+    },
+    "nvidia_smi_topology": {
+      "command": [
+        "nvidia-smi",
+        "topo",
+        "-m"
+      ],
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "\u001b[4mGPU0\tGPU1\tNIC0\tNIC1\tNIC2\tNIC3\tNIC4\tNIC5\tNIC6\tNIC7\tNIC8\tNIC9\tNIC10\tNIC11\tCPU Affinity\tNUMA Affinity\tGPU NUMA ID\u001b[0m\nGPU0\t X \tNV18\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tNODE\tNODE\tNODE\tNODE\tNODE\t56-111,168-223\t1\t\tN/A\nGPU1\tNV18\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tNODE\tNODE\tNODE\tNODE\tNODE\tPXB\t56-111,168-223\t1\t\tN/A\nNIC0\tSYS\tSYS\t X \tNODE\tNODE\tNODE\tNODE\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC1\tSYS\tSYS\tNODE\t X \tPIX\tNODE\tNODE\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC2\tSYS\tSYS\tNODE\tPIX\t X \tNODE\tNODE\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC3\tSYS\tSYS\tNODE\tNODE\tNODE\t X \tNODE\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC4\tSYS\tSYS\tNODE\tNODE\tNODE\tNODE\t X \tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC5\tSYS\tSYS\tNODE\tNODE\tNODE\tNODE\tNODE\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC6\tPXB\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tNODE\tNODE\tNODE\tNODE\tNODE\t\t\t\t\nNIC7\tNODE\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tNODE\t X \tPIX\tNODE\tNODE\tNODE\t\t\t\t\nNIC8\tNODE\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tNODE\tPIX\t X \tNODE\tNODE\tNODE\t\t\t\t\nNIC9\tNODE\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tNODE\tNODE\tNODE\t X \tNODE\tNODE\t\t\t\t\nNIC10\tNODE\tNODE\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tNODE\tNODE\tNODE\tNODE\t X \tNODE\t\t\t\t\nNIC11\tNODE\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tNODE\tNODE\tNODE\tNODE\tNODE\t X \t\t\t\t\n\nLegend:\n\n  X    = Self\n  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)\n  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node\n  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)\n  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\n  PIX  = Connection traversing at most a single PCIe bridge\n  NV#  = Connection traversing a bonded set of # NVLinks\n\nNIC Legend:\n\n  NIC0: mlx5_0\n  NIC1: mlx5_1\n  NIC2: mlx5_2\n  NIC3: mlx5_3\n  NIC4: mlx5_4\n  NIC5: mlx5_5\n  NIC6: mlx5_6\n  NIC7: mlx5_7\n  NIC8: mlx5_8\n  NIC9: mlx5_9\n  NIC10: mlx5_10\n  NIC11: mlx5_11"
+    }
+  },
+  "cwd": "/workspace/vllm",
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": null,
+    "NCCL_ALGO": null,
+    "NCCL_DEBUG": null,
+    "NCCL_PROTO": null,
+    "PCP_DCP_MLA_PROFILE": "1",
+    "VLLM_NVTX_SCOPES_FOR_PROFILING": "1"
+  },
+  "experiment": {
+    "activation_dtype": "bfloat16",
+    "attention_backend_request": "FLASHMLA",
+    "expected_outer_backend": "FLASHMLA",
+    "hf_config_path": null,
+    "kv_cache_dtype": "bfloat16",
+    "max_model_len": 131072,
+    "mla_prefill_backend_request": "auto",
+    "mode": "events",
+    "model": "deepseek-ai/DeepSeek-V3",
+    "prefix_tokens": 20480,
+    "repository_requirement": {
+      "experiment_git_sha": "14e4fa7a97866ebf156bdb07192dfdff31458252",
+      "precompiled_source_is_ancestor": true,
+      "precompiled_source_sha": "c810e5ee9976ad86b81d1277b53e76d0ee639414",
+      "required_commit": "b6ff8a2f509cc7ac9c58176f5115a836aa1e08bd",
+      "required_commit_is_ancestor": true,
+      "required_pr": "https://github.com/vllm-project/vllm/pull/46570"
+    },
+    "revision": null,
+    "suffix_tokens": 256,
+    "weight_format": "dummy unquantized BF16"
+  },
+  "git": {
+    "commit": "commit 14e4fa7a97866ebf156bdb07192dfdff31458252\nAuthor:     Jie Luo <65482183+Livinfly@users.noreply.github.com>\nAuthorDate: Sat Aug 8 02:27:00 2026 +0000\nCommit:     Jie Luo <65482183+Livinfly@users.noreply.github.com>\nCommitDate: Sat Aug 8 02:50:09 2026 +0000\n\n    Add PCP/DCP MLA prefix-prefill results\n    \n    Assisted-by: OpenAI Codex\n    \n    Signed-off-by: Jie Luo <65482183+Livinfly@users.noreply.github.com>",
+    "head": "14e4fa7a97866ebf156bdb07192dfdff31458252",
+    "origin_main": "e644c8cd8c734bf3b5e662a4bc363cfa8524d821",
+    "status": "## dev/pcp-comm-analysis...livinfly/dev/pcp-comm-analysis\n M benchmarks/experimental/pcp_dcp_mla_prefix/README.md\n M benchmarks/experimental/pcp_dcp_mla_prefix/run_experiment.py\n M benchmarks/experimental/pcp_dcp_mla_prefix/run_nsys.sh\n M benchmarks/experimental/pcp_dcp_mla_prefix/sanitize_nsys_sqlite.py\n?? artifacts/"
+  },
+  "hostname": "e52ac8e6d87b",
+  "platform": "Linux-6.8.0-1026-oracle-x86_64-with-glibc2.39",
+  "python": "3.12.3 (main, Aug 14 2025, 17:47:21) [GCC 13.3.0]",
+  "resolved_command": "/workspace/vllm/.venv/bin/python benchmarks/experimental/pcp_dcp_mla_prefix/run_experiment.py --mode events --prefix-tokens 20480 --allow-non-contract-shape --output-dir artifacts/pcp-dcp-flashmla-20260811/prefix20k/events",
+  "timestamp_utc": "2026-08-11T02:34:08.811677+00:00"
+}

@@ -1,0 +1,26 @@
+{
+  "prefix_sha256_le_u32": "fb8365ab80a0f811eabb3a4a3c3cfabac1ff8844488b5e8c0749674eebdd508a",
+  "prefix_tokens": 20480,
+  "suffixes": {
+    "measure_0": {
+      "first_token": 20009,
+      "sha256_le_u32": "585256a02ff7caab5f35f652ebe3b82534cd5c874c70686049c4a155830b6e20",
+      "tokens": 256
+    },
+    "measure_1": {
+      "first_token": 20106,
+      "sha256_le_u32": "547954153661123c256304d5814a2928723683035604e28fe93933733032218a",
+      "tokens": 256
+    },
+    "measure_2": {
+      "first_token": 20203,
+      "sha256_le_u32": "33b5e96eed78f1831811ac18c455277b37b31dfc9b9b340a9a6b1d5fb78a1de3",
+      "tokens": 256
+    },
+    "warmup_0": {
+      "first_token": 10309,
+      "sha256_le_u32": "b2148cec3fbe8a305f9982454f178887156adfa5578f49f55123ab4e51320daa",
+      "tokens": 256
+    }
+  }
+}

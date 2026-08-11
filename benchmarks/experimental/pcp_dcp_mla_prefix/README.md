@@ -3,7 +3,7 @@
 This directory contains an attribution-oriented experiment for one
 DeepSeek-V3 layer with TP=1, PCP=2, and DCP=2 on two H100s. It uses dummy,
 unquantized BF16 weights, BF16 activations, a BF16 KV cache, eager execution,
-and automatic attention-backend selection.
+and an explicitly selected FlashMLA attention backend.
 
 The native-extension baseline is frozen to
 `c810e5ee9976ad86b81d1277b53e76d0ee639414`, the source commit matching the
@@ -18,17 +18,17 @@ The driver fails closed unless all of the following are observed:
 - one layer with DeepSeek-V3's original dimensions and a dense layer-0 MLP;
 - no `index_topk` and no weight quantization;
 - two worker ranks and the requested TP/PCP/DCP configuration;
-- exactly 81,920 cached prompt tokens and 256 computed suffix tokens;
+- exactly 81,920 cached prompt tokens and 256 computed suffix tokens for the
+  contract run (alternate prefix sizes require `--allow-non-contract-shape`);
 - one scheduler/model step for every suffix request;
 - about 128 local Q tokens on each PCP rank;
 - the expected per-rank DCP, PCP-cache, and hidden-restore payloads;
-- automatic outer-backend selection of `FLASH_ATTN_MLA` on the frozen commit.
+- explicit outer-backend selection of `FLASHMLA`.
 
-The last check does not force a backend. On the frozen precompiled commit, H100
-selects outer `FLASH_ATTN_MLA` and prefill `FLASH_ATTN`, even though the handoff
-expected outer `FLASHMLA`. The run records this as an environment/version
-deviation instead of forcing a different path. `--expect-outer-backend ANY` is
-available only for diagnosis.
+The driver requests `FLASHMLA` through `attention_config.backend` and verifies
+the resolved worker backend. Use `--attention-backend auto
+--expect-outer-backend FLASH_ATTN_MLA` only when reproducing the earlier
+automatic-selection baseline.
 
 ## Environment
 
@@ -88,6 +88,19 @@ PCP_DCP_MLA_PROFILE=1 VLLM_NVTX_SCOPES_FOR_PROFILING=1 \
   --output-dir artifacts/pcp-dcp-events
 ```
 
+Add the 20K and 40K prefix points with the same 256-token suffix:
+
+```bash
+for prefix_tokens in 20480 40960; do
+  PCP_DCP_MLA_PROFILE=1 VLLM_NVTX_SCOPES_FOR_PROFILING=1 \
+    .venv/bin/python \
+    benchmarks/experimental/pcp_dcp_mla_prefix/run_experiment.py \
+    --mode events --prefix-tokens "$prefix_tokens" \
+    --allow-non-contract-shape \
+    --output-dir "artifacts/pcp-dcp-flashmla-${prefix_tokens}-events"
+done
+```
+
 After the smoke succeeds, capture one additional 80K nsys iteration:
 
 ```bash
@@ -95,19 +108,28 @@ MODE=nsys RUN_DIR=artifacts/pcp-dcp-nsys \
   benchmarks/experimental/pcp_dcp_mla_prefix/run_nsys.sh
 ```
 
-The launcher checks the installed `nsys profile --help`. It enables child
-process tracing, `cudaProfilerApi` capture, and `--discard-environment` only
-when those flags exist. The driver primes and warms the cache before calling
-`cudaProfilerStart`, then profiles exactly one distinct suffix request.
+Set `PREFIX_TOKENS` to capture the additional prefix sizes. The launcher names
+the reports `prefix20k_suffix256.nsys-rep` and
+`prefix40k_suffix256.nsys-rep` and computes each payload baseline from the
+requested prefix length.
 
-Nsight Systems versions without `--discard-environment` can retain host-side
-environment metadata even when the target process starts with a scrubbed
-environment. If credential-like variables exist, the launcher fails closed on
-such versions unless `ALLOW_NSYS_ENV_CAPTURE=1` is explicitly set. Raw reports
-from that opt-in mode must remain local. The launcher also writes a portable
-SQLite containing only experiment NVTX markers, CUDA launches, GPU kernels, and
-their referenced names. The portable database is independently accepted by
-`analyze_nsys.py` and is checked against current credential-like values.
+```bash
+for prefix_tokens in 20480 40960; do
+  PREFIX_TOKENS=$prefix_tokens MODE=nsys \
+    RUN_DIR="artifacts/pcp-dcp-flashmla-${prefix_tokens}-nsys" \
+    benchmarks/experimental/pcp_dcp_mla_prefix/run_nsys.sh
+done
+```
+
+The launcher checks the installed `nsys profile --help`. It enables child
+process tracing, `cudaProfilerApi` capture, and `--discard-environment` when
+those flags exist. It starts nsys itself with a minimal environment allowlist.
+For older nsys versions that still capture ancestor-process environments, it
+creates an equal-length redacted `.sanitized.nsys-rep`, verifies that nsys can
+re-export it, and keeps the unsafe raw report local. The driver primes and warms
+the cache before calling `cudaProfilerStart`, then profiles exactly one distinct
+suffix request. The launcher also writes a portable SQLite containing only
+experiment NVTX markers, CUDA launches, GPU kernels, and their referenced names.
 
 ## Workload and evidence
 
@@ -157,7 +179,7 @@ The launcher invokes `analyze_nsys.py`. It can also be run directly:
 ```bash
 .venv/bin/python \
   benchmarks/experimental/pcp_dcp_mla_prefix/analyze_nsys.py \
-  --input artifacts/pcp-dcp-nsys/prefix80k_suffix256.nsys-rep \
+  --input artifacts/pcp-dcp-nsys/prefix80k_suffix256.sanitized.nsys-rep \
   --output-dir artifacts/pcp-dcp-nsys/precise-analysis \
   --label nsys_0 \
   --unique-prefix-send-bytes 47185920
