@@ -18,12 +18,31 @@ from urllib.parse import unquote
 import regex as re
 
 MARKER_PREFIX = "VLLM_PCP_DCP_MLA"
-COMM_CATEGORIES = (
-    "context_attention_comm",
-    "suffix_cache_comm",
-    "hidden_restore_comm",
-)
-ATTENTION_COMM_CATEGORIES = COMM_CATEGORIES[:2]
+COMM_PROFILES = {
+    "dense": {
+        "all": (
+            "context_attention_comm",
+            "suffix_cache_comm",
+            "hidden_restore_comm",
+        ),
+        "attention": ("context_attention_comm", "suffix_cache_comm"),
+    },
+    "sparse": {
+        "all": (
+            "suffix_cache_comm",
+            "sparse_indexer_comm",
+            "attention_lse_comm",
+            "attention_output_comm",
+            "hidden_restore_comm",
+        ),
+        "attention": (
+            "suffix_cache_comm",
+            "sparse_indexer_comm",
+            "attention_lse_comm",
+            "attention_output_comm",
+        ),
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -342,6 +361,7 @@ def _scope_metrics(
     rank_ranges: list[NvtxRange],
     kernels: list[Kernel],
     nccl_pattern: re.Pattern[str],
+    attention_comm_categories: tuple[str, ...],
 ) -> tuple[dict[str, Any], list[Kernel]]:
     scope_kernels = _kernels_in_range(scope_marker, kernels)
     if not scope_kernels:
@@ -356,9 +376,9 @@ def _scope_metrics(
             for kernel in _range_kernels(rank_ranges, kernels, category)
             if nccl_pattern.search(kernel.name) and kernel.rowid in scope_kernel_ids
         ]
-        for category in ATTENTION_COMM_CATEGORIES
+        for category in attention_comm_categories
     }
-    for category in ATTENTION_COMM_CATEGORIES:
+    for category in attention_comm_categories:
         outside_scope = [
             kernel
             for kernel in _range_kernels(rank_ranges, kernels, category)
@@ -422,6 +442,82 @@ def _scope_metrics(
     return metrics, scope_kernels
 
 
+def _subscope_metrics(
+    name: str,
+    marker: NvtxRange,
+    rank_ranges: list[NvtxRange],
+    kernels: list[Kernel],
+    nccl_pattern: re.Pattern[str],
+    comm_categories: tuple[str, ...],
+) -> dict[str, Any]:
+    scope_kernels = _kernels_in_range(marker, kernels)
+    if not scope_kernels:
+        raise RuntimeError(f"No kernels were associated with {marker.message}")
+    scope_kernel_ids = {kernel.rowid for kernel in scope_kernels}
+    nested_ranges = [
+        candidate
+        for candidate in rank_ranges
+        if candidate.end is not None
+        and candidate.start >= marker.start
+        and candidate.end <= marker.end
+    ]
+    comm_by_category = {
+        category: [
+            kernel
+            for kernel in _range_kernels(nested_ranges, kernels, category)
+            if nccl_pattern.search(kernel.name) and kernel.rowid in scope_kernel_ids
+        ]
+        for category in comm_categories
+    }
+    comm_kernels = _unique_kernels(
+        [kernel for rows in comm_by_category.values() for kernel in rows]
+    )
+    scope_nccl = [
+        kernel for kernel in scope_kernels if nccl_pattern.search(kernel.name)
+    ]
+    classified_ids = {kernel.rowid for kernel in comm_kernels}
+    unclassified = [
+        kernel for kernel in scope_nccl if kernel.rowid not in classified_ids
+    ]
+    if unclassified:
+        names = sorted({kernel.name for kernel in unclassified})
+        raise RuntimeError(f"Unclassified NCCL kernels inside {name}: {names}")
+
+    compute_kernels = [
+        kernel for kernel in scope_kernels if not nccl_pattern.search(kernel.name)
+    ]
+    start = min(kernel.start for kernel in scope_kernels)
+    end = max(kernel.end for kernel in scope_kernels)
+    comm_intervals = [kernel.interval for kernel in comm_kernels]
+    compute_intervals = [kernel.interval for kernel in compute_kernels]
+    total_ns = end - start
+    comm_ns = interval_duration(comm_intervals)
+    compute_ns = interval_duration(compute_intervals)
+    overlap_ns = intersection_duration(comm_intervals, compute_intervals)
+    exposed_ns = comm_ns - overlap_ns
+    if total_ns <= 0 or comm_ns <= 0:
+        raise RuntimeError(f"{name} scope or communication duration is zero.")
+    return {
+        "scope": name,
+        "T_ns": total_ns,
+        "C_ns": comm_ns,
+        "A_ns": compute_ns,
+        "O_ns": overlap_ns,
+        "E_ns": exposed_ns,
+        "raw_comm_ratio": comm_ns / total_ns,
+        "overlap_rate": overlap_ns / comm_ns,
+        "exposed_comm_ratio": exposed_ns / total_ns,
+        "scope_kernel_count": len(scope_kernels),
+        "compute_kernel_count": len(compute_kernels),
+        "attention_comm_kernel_count": len(comm_kernels),
+        "categories": {
+            category: _timing(category_kernels) | _payload(nested_ranges, category)
+            for category, category_kernels in comm_by_category.items()
+        },
+        "marker": marker.fields,
+    }
+
+
 def _rank_summary(
     rank: int,
     label: str,
@@ -429,6 +525,8 @@ def _rank_summary(
     kernels: list[Kernel],
     nccl_pattern: re.Pattern[str],
     unique_prefix_send_bytes: int | None,
+    comm_categories: tuple[str, ...],
+    attention_comm_categories: tuple[str, ...],
 ) -> dict[str, Any]:
     rank_ranges = [
         marker
@@ -452,13 +550,38 @@ def _rank_summary(
     devices = set()
     for scope, markers in by_scope.items():
         metrics, scope_kernels = _scope_metrics(
-            markers[0], rank_ranges, kernels, nccl_pattern
+            markers[0],
+            rank_ranges,
+            kernels,
+            nccl_pattern,
+            attention_comm_categories,
         )
         devices.update(kernel.device for kernel in scope_kernels)
         scope_results[scope] = metrics
 
+    subscope_results = {}
+    if "sparse_indexer_comm" in attention_comm_categories:
+        indexer_markers = [
+            marker
+            for marker in rank_ranges
+            if marker.fields["category"] == "sparse_indexer_scope"
+            and marker.end is not None
+        ]
+        if len(indexer_markers) != 1:
+            raise RuntimeError(
+                f"Expected one sparse_indexer_scope range: {indexer_markers}"
+            )
+        subscope_results["sparse_indexer"] = _subscope_metrics(
+            "sparse_indexer",
+            indexer_markers[0],
+            rank_ranges,
+            kernels,
+            nccl_pattern,
+            ("suffix_cache_comm", "sparse_indexer_comm"),
+        )
+
     category_results = {}
-    for category in COMM_CATEGORIES:
+    for category in comm_categories:
         candidates = _range_kernels(rank_ranges, kernels, category)
         communication = [
             kernel for kernel in candidates if nccl_pattern.search(kernel.name)
@@ -472,20 +595,21 @@ def _rank_summary(
         category_results[category] = _timing(communication) | _payload(
             rank_ranges, category
         )
-    context = category_results["context_attention_comm"]
-    context_seconds = context["union_ns"] / 1e9
-    context["send_only_effective_bandwidth_GBps"] = (
-        context["send_bytes"] / context_seconds / 1e9
-    )
-    if unique_prefix_send_bytes is not None:
-        context["unique_prefix_send_bytes"] = unique_prefix_send_bytes
-        context["unique_prefix_send_only_effective_bandwidth_GBps"] = (
-            unique_prefix_send_bytes / context_seconds / 1e9
+    if "context_attention_comm" in category_results:
+        context = category_results["context_attention_comm"]
+        context_seconds = context["union_ns"] / 1e9
+        context["send_only_effective_bandwidth_GBps"] = (
+            context["send_bytes"] / context_seconds / 1e9
         )
+        if unique_prefix_send_bytes is not None:
+            context["unique_prefix_send_bytes"] = unique_prefix_send_bytes
+            context["unique_prefix_send_only_effective_bandwidth_GBps"] = (
+                unique_prefix_send_bytes / context_seconds / 1e9
+            )
     attention_path_kernels = _unique_kernels(
         [
             kernel
-            for category in ATTENTION_COMM_CATEGORIES
+            for category in attention_comm_categories
             for kernel in _range_kernels(rank_ranges, kernels, category)
             if nccl_pattern.search(kernel.name)
         ]
@@ -493,19 +617,19 @@ def _rank_summary(
     category_results["attention_path_comm"] = _timing(attention_path_kernels) | {
         "collectives": sum(
             category_results[category]["collectives"]
-            for category in ATTENTION_COMM_CATEGORIES
+            for category in attention_comm_categories
         ),
         "send_bytes": sum(
             category_results[category]["send_bytes"]
-            for category in ATTENTION_COMM_CATEGORIES
+            for category in attention_comm_categories
         ),
         "recv_bytes": sum(
             category_results[category]["recv_bytes"]
-            for category in ATTENTION_COMM_CATEGORIES
+            for category in attention_comm_categories
         ),
         "markers": [
             marker
-            for category in ATTENTION_COMM_CATEGORIES
+            for category in attention_comm_categories
             for marker in category_results[category]["markers"]
         ],
     }
@@ -518,6 +642,7 @@ def _rank_summary(
         "rank": rank,
         "devices": sorted(devices),
         "scopes": scope_results,
+        "subscopes": subscope_results,
         "communication": category_results,
         "pcp_partition": partition,
     }
@@ -592,7 +717,8 @@ def _write_kernels(path: Path, kernels: list[Kernel]) -> None:
 def _write_summary_csv(path: Path, result: dict[str, Any]) -> None:
     rows = []
     for rank_result in result["ranks"]:
-        for scope, metrics in rank_result["scopes"].items():
+        scopes = rank_result["scopes"] | rank_result.get("subscopes", {})
+        for scope, metrics in scopes.items():
             rows.append(
                 {
                     "rank": rank_result["rank"],
@@ -639,7 +765,14 @@ def analyze(
     expected_ranks: int,
     nccl_regex: str,
     unique_prefix_send_bytes: int | None = None,
+    workload: str = "dense",
 ) -> dict[str, Any]:
+    try:
+        comm_profile = COMM_PROFILES[workload]
+    except KeyError as error:
+        raise ValueError(f"Unknown workload profile: {workload}") from error
+    comm_categories = comm_profile["all"]
+    attention_comm_categories = comm_profile["attention"]
     output_dir.mkdir(parents=True, exist_ok=True)
     sqlite_path = _export_sqlite(input_path, output_dir)
     connection = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
@@ -685,6 +818,8 @@ def analyze(
             kernels,
             nccl_pattern,
             unique_prefix_send_bytes,
+            comm_categories,
+            attention_comm_categories,
         )
         for rank in ranks
     ]
@@ -695,14 +830,23 @@ def analyze(
             "slower_rank": slowest["rank"],
             **slowest["scopes"][scope],
         }
+    subscope_headline = {}
+    for scope in rank_results[0].get("subscopes", {}):
+        slowest = max(rank_results, key=lambda row: row["subscopes"][scope]["T_ns"])
+        subscope_headline[scope] = {
+            "slower_rank": slowest["rank"],
+            **slowest["subscopes"][scope],
+        }
     result = {
         "input": str(input_path),
         "sqlite": str(sqlite_path),
         "label": label,
         "nccl_regex": nccl_regex,
         "unique_prefix_send_bytes": unique_prefix_send_bytes,
+        "workload": workload,
         "ranks": rank_results,
         "headline": headline,
+        "subscope_headline": subscope_headline,
     }
     (output_dir / "summary.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -812,6 +956,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-ranks", type=int, default=2)
     parser.add_argument("--nccl-regex", default=r"(?i)(nccl|msccl)")
     parser.add_argument("--unique-prefix-send-bytes", type=int)
+    parser.add_argument("--workload", choices=tuple(COMM_PROFILES), default="dense")
     parser.add_argument("--self-test", action="store_true")
     return parser.parse_args()
 
@@ -831,6 +976,7 @@ def main() -> None:
         args.expected_ranks,
         args.nccl_regex,
         args.unique_prefix_send_bytes,
+        args.workload,
     )
     print(json.dumps(result["headline"], indent=2, sort_keys=True))
 

@@ -3,6 +3,7 @@
 import torch
 
 from vllm.distributed.parallel_state import GroupCoordinator
+from vllm.profiler.pcp_dcp_mla import timed_range
 from vllm.triton_utils import tl, triton
 
 
@@ -197,9 +198,20 @@ def _cp_lse_common(
         ctx = CPTritonContext()
 
     cp_attn_lse = cp_attn_lse.contiguous()
-    lses = cp_group.all_gather(cp_attn_lse, dim=0).reshape(
-        (cp_group.world_size,) + cp_attn_lse.shape
-    )
+    local_bytes = cp_attn_lse.numel() * cp_attn_lse.element_size()
+    with timed_range(
+        "attention_lse_comm",
+        collective="dcp_all_gather",
+        shape=cp_attn_lse.shape,
+        dtype=cp_attn_lse.dtype,
+        element_size=cp_attn_lse.element_size(),
+        world_size=cp_group.world_size,
+        send_bytes=local_bytes * (cp_group.world_size - 1),
+        recv_bytes=local_bytes * (cp_group.world_size - 1),
+    ):
+        lses = cp_group.all_gather(cp_attn_lse, dim=0).reshape(
+            (cp_group.world_size,) + cp_attn_lse.shape
+        )
     out, lse = correct_attn_out(
         cp_attn_out,
         lses,
@@ -250,7 +262,18 @@ def cp_lse_ag_out_ar(
     out, lse = _cp_lse_common(
         cp_attn_out, cp_attn_lse, cp_group, ctx=ctx, is_lse_base_on_e=is_lse_base_on_e
     )
-    out = cp_group.all_reduce(out)
+    local_bytes = out.numel() * out.element_size()
+    with timed_range(
+        "attention_output_comm",
+        collective="dcp_all_reduce",
+        shape=out.shape,
+        dtype=out.dtype,
+        element_size=out.element_size(),
+        world_size=cp_group.world_size,
+        send_bytes=local_bytes * (cp_group.world_size - 1),
+        recv_bytes=local_bytes * (cp_group.world_size - 1),
+    ):
+        out = cp_group.all_reduce(out)
 
     if return_lse:
         return out, lse

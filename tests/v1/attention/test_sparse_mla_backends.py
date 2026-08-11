@@ -1516,6 +1516,8 @@ def _build_sparse_dcp_vllm_config(
     local_heads: int,
     dcp_world_size: int,
     comm_backend: str = "ag_rs",
+    pcp_world_size: int = 1,
+    force_mqa: bool = False,
 ):
     """Minimal sparse-MLA VllmConfig for the FlashMLASparse DCP head-envelope
     guard. TP is simulated by mocking ``get_num_attention_heads`` to return the
@@ -1559,7 +1561,9 @@ def _build_sparse_dcp_vllm_config(
 
     vllm_config.cache_config.cache_dtype = "fp8_ds_mla"
     vllm_config.parallel_config.decode_context_parallel_size = dcp_world_size
+    vllm_config.parallel_config.prefill_context_parallel_size = pcp_world_size
     vllm_config.parallel_config.dcp_comm_backend = comm_backend
+    vllm_config.attention_config.sparse_mla_force_mqa = force_mqa
     # The base builder clones the layer's dense-MHA prefill backend from
     # static_forward_context; the guard tests never run prefill.
     vllm_config.compilation_config.static_forward_context["placeholder"] = (
@@ -1601,6 +1605,38 @@ def test_fp8_dcp_head_envelope_guard(local_heads, dcp_world_size, should_raise):
         gathered_pad = 64 if gathered_heads <= 64 else 128
         assert builder.fp8_decode_padded_heads == local_pad
         assert local_pad == gathered_pad
+
+
+@pytest.mark.skipif(
+    torch.cuda.get_device_capability() < (9, 0),
+    reason="FlashMLASparseBackend requires CUDA 9.0 or higher",
+)
+@pytest.mark.parametrize("force_mqa", [False, True])
+def test_fp8_dcp_tp1_pcp_path_requires_explicit_mqa(force_mqa: bool):
+    """TP1 keeps 128 heads local when PCP and DCP have the same size.
+
+    The mixed fp8 kernel supports that shape, but selecting it above the normal
+    performance threshold must remain an explicit benchmark opt-in.
+    """
+    device = torch.device(DEVICE_TYPE)
+    vllm_config = _build_sparse_dcp_vllm_config(
+        local_heads=128,
+        dcp_world_size=2,
+        pcp_world_size=2,
+        force_mqa=force_mqa,
+    )
+    kv_cache_spec = create_standard_kv_cache_spec(vllm_config)
+    builder_cls = FlashMLASparseBackend.get_builder_cls()
+
+    if not force_mqa:
+        with pytest.raises(NotImplementedError, match="mixed-batch fp8 path"):
+            builder_cls(kv_cache_spec, ["placeholder"], vllm_config, device)
+        return
+
+    builder = builder_cls(kv_cache_spec, ["placeholder"], vllm_config, device)
+    assert builder.num_heads == 128
+    assert builder.fp8_decode_padded_heads == 128
+    assert builder.fp8_use_mixed_batch
 
 
 def test_fp8_mixed_batch_dcp_neutralizes_empty_rows(monkeypatch):
@@ -1647,6 +1683,7 @@ def test_fp8_mixed_batch_dcp_neutralizes_empty_rows(monkeypatch):
         dcp_world_size=2,
         dcp_rank=0,
         need_to_return_lse_for_decode=True,
+        kv_cache_dtype="fp8_ds_mla",
         _fp8_flash_mla_kernel=run_kernel,
     )
 

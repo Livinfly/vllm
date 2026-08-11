@@ -16,6 +16,7 @@ from vllm.model_executor.layers.attention.sparse_mla_attention import (
 )
 from vllm.platforms import current_platform
 from vllm.platforms.interface import DeviceCapability
+from vllm.profiler.pcp_dcp_mla import timed_range
 from vllm.utils.platform_utils import num_compute_units
 from vllm.utils.torch_utils import is_quantized_kv_cache
 from vllm.v1.attention.backend import (
@@ -317,9 +318,21 @@ class FlashMLASparseMetadataBuilder(
             device=device,
         )
 
-        self.fp8_use_mixed_batch = self.num_heads < MIN_HEADS_FOR_BF16_PREFILL
+        dcp_world_size = parallel_config.decode_context_parallel_size
+        pcp_world_size = parallel_config.prefill_context_parallel_size
+        force_mqa = vllm_config.attention_config.sparse_mla_force_mqa
+        forced_pcp_dcp_mixed_batch = (
+            self.use_fp8_kv_cache
+            and force_mqa
+            and dcp_world_size > 1
+            and pcp_world_size > 1
+            and dcp_world_size <= pcp_world_size
+        )
+        self.fp8_use_mixed_batch = (
+            self.num_heads < MIN_HEADS_FOR_BF16_PREFILL or forced_pcp_dcp_mixed_batch
+        )
 
-        if parallel_config.decode_context_parallel_size > 1:
+        if dcp_world_size > 1:
             if parallel_config.dcp_comm_backend != "ag_rs":
                 raise NotImplementedError(
                     "DCP for FlashMLA sparse is only validated with the "
@@ -337,11 +350,13 @@ class FlashMLASparseMetadataBuilder(
             # Head padding (and the tile-scheduler metadata sized from it) is
             # computed from the local head count, but the kernel runs on the
             # DCP-gathered heads.
-            gathered_num_heads = (
-                self.num_heads * parallel_config.decode_context_parallel_size
+            kernel_num_heads = (
+                self.num_heads
+                if pcp_world_size > 1 and dcp_world_size <= pcp_world_size
+                else self.num_heads * dcp_world_size
             )
             gathered_padded_heads = FlashMLASparseImpl._compute_fp8_decode_padded_heads(
-                gathered_num_heads
+                kernel_num_heads
             )
             if self.fp8_decode_padded_heads != gathered_padded_heads:
                 raise NotImplementedError(
@@ -349,7 +364,7 @@ class FlashMLASparseMetadataBuilder(
                     "DCP-gathered head counts to pad to the same fp8 decode "
                     f"kernel envelope; got {self.num_heads} local heads "
                     f"(pad to {self.fp8_decode_padded_heads}) vs "
-                    f"{gathered_num_heads} gathered heads (pad to "
+                    f"{kernel_num_heads} kernel heads (pad to "
                     f"{gathered_padded_heads})"
                 )
 
@@ -819,12 +834,20 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
         )
         fp8_metadata = attn_metadata.fp8_extra_metadata
 
-        _attn_out, _lse = self._fp8_flash_mla_kernel(
-            q=q.unsqueeze(0),  # unsqueeze to add batch_dim: (T, H, D) -> (1, T, H, D)
-            kv_c_and_k_pe_cache=kv_c_and_k_pe_cache,
-            topk_indices=topk_indices.unsqueeze(0),  # (T, topk) -> (1, T, topk)
-            kernel_metadata=fp8_metadata,
-        )
+        with timed_range(
+            "sparse_attention_compute",
+            kernel="flashmla_fp8_mixed_batch",
+            local_q_tokens=q.shape[0],
+            heads=q.shape[1],
+            topk_tokens=topk_indices.shape[1],
+            cache_dtype=self.kv_cache_dtype,
+        ):
+            _attn_out, _lse = self._fp8_flash_mla_kernel(
+                q=q.unsqueeze(0),
+                kv_c_and_k_pe_cache=kv_c_and_k_pe_cache,
+                topk_indices=topk_indices.unsqueeze(0),
+                kernel_metadata=fp8_metadata,
+            )
         # Output is (1, T, H, D_v), squeeze back to (T, H, D_v)
         out = _attn_out.squeeze(0)
 

@@ -26,6 +26,14 @@ find_nsys() {
 }
 
 mode=${MODE:-nsys}
+workload=${WORKLOAD:-dense}
+case "$workload" in
+    dense|sparse) ;;
+    *)
+        echo "WORKLOAD must be dense or sparse" >&2
+        exit 2
+        ;;
+esac
 case "$mode" in
     nsys)
         measured_label=nsys_0
@@ -55,6 +63,9 @@ case "$prefix_tokens" in
     *) prefix_label=$prefix_tokens ;;
 esac
 profile_name="prefix${prefix_label}_suffix256"
+if [[ $workload == sparse ]]; then
+    profile_name="sparse_${profile_name}"
+fi
 unique_prefix_send_bytes=$((prefix_tokens * 576))
 
 nsys_bin=$(find_nsys || true)
@@ -106,6 +117,7 @@ driver=(
     --mode "$mode"
     --output-dir "$driver_dir"
     --prefix-tokens "$prefix_tokens"
+    --workload "$workload"
 )
 if (( prefix_tokens != default_prefix_tokens )); then
     driver+=(--allow-non-contract-shape)
@@ -117,6 +129,7 @@ launch=(env -i)
 for name in \
     HOME PATH LD_LIBRARY_PATH PYTHONPATH CUDA_VISIBLE_DEVICES CUDA_HOME \
     HF_HOME HUGGINGFACE_HUB_CACHE TRANSFORMERS_CACHE XDG_CACHE_HOME TMPDIR \
+    VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS \
     NCCL_DEBUG NCCL_ALGO NCCL_PROTO LANG LC_ALL; do
     if [[ -n ${!name+x} ]]; then
         launch+=("$name=${!name}")
@@ -152,12 +165,18 @@ redaction_report="${profile_prefix}.redaction.json"
     --nsys-bin "$nsys_bin" \
     --force
 
-.venv/bin/python \
-    benchmarks/experimental/pcp_dcp_mla_prefix/analyze_nsys.py \
-    --input "$report" \
-    --output-dir "$run_dir/precise-analysis" \
-    --label "$measured_label" \
-    --unique-prefix-send-bytes "$unique_prefix_send_bytes"
+analyzer=(
+    .venv/bin/python
+    benchmarks/experimental/pcp_dcp_mla_prefix/analyze_nsys.py
+    --input "$report"
+    --output-dir "$run_dir/precise-analysis"
+    --label "$measured_label"
+    --workload "$workload"
+)
+if [[ $workload == dense ]]; then
+    analyzer+=(--unique-prefix-send-bytes "$unique_prefix_send_bytes")
+fi
+"${analyzer[@]}"
 
 analysis_name="${profile_name}.sanitized"
 sqlite="$run_dir/precise-analysis/${analysis_name}.sqlite"
@@ -173,7 +192,7 @@ if [[ ${RUN_OVERVIEW:-1} == 1 ]]; then
         tools/profiler/nsys_profile_tools/gputrc2graph.py \
         --in_file "$report,vllm,ds,0" \
         --out_dir "$run_dir/overview" \
-        --title "DeepSeek-V3 1L TP1 PCP2 DCP2 prefix${prefix_label} suffix256"
+        --title "DeepSeek MLA ${workload} 1L TP1 PCP2 DCP2 prefix${prefix_label} suffix256"
 fi
 
 echo "Private raw report: $raw_report"

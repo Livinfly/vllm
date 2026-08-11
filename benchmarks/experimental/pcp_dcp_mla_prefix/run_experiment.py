@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""Run the dense MLA PCP+DCP cached-prefix prefill experiment."""
+"""Run the dense or sparse MLA PCP+DCP cached-prefix prefill experiment."""
 
 import argparse
 import gzip
@@ -42,6 +42,10 @@ V_HEAD_DIM = 128
 EXPERIMENT_ROOT = Path("benchmarks/experimental/pcp_dcp_mla_prefix")
 EXPECTED_GIT_SHA = "c810e5ee9976ad86b81d1277b53e76d0ee639414"
 REQUIRED_PCP_COMMIT = "b6ff8a2f509cc7ac9c58176f5115a836aa1e08bd"
+REQUIRED_SPARSE_DCP_COMMIT = "757c95ce262172fc360d5c65d43b7186a327df70"
+SPARSE_MODEL = "deepseek-ai/DeepSeek-V3.2-Exp"
+SPARSE_TOPK_TOKENS = 2_048
+SPARSE_INDEX_HEAD_DIM = 128
 
 
 def _run_command(command: list[str]) -> dict[str, Any]:
@@ -69,7 +73,7 @@ def _git_output(*args: str) -> str | None:
     return result.get("stdout", "")
 
 
-def _validate_repository(expected_sha: str) -> dict[str, Any]:
+def _validate_repository(expected_sha: str, workload: str) -> dict[str, Any]:
     head = _git_output("rev-parse", "HEAD")
     source_ancestor = _run_command(
         ["git", "merge-base", "--is-ancestor", expected_sha, "HEAD"]
@@ -86,7 +90,7 @@ def _validate_repository(expected_sha: str) -> dict[str, Any]:
             f"HEAD does not contain required PCP commit {REQUIRED_PCP_COMMIT} "
             "from PR #46570."
         )
-    return {
+    evidence = {
         "experiment_git_sha": head,
         "precompiled_source_sha": expected_sha,
         "precompiled_source_is_ancestor": True,
@@ -94,6 +98,29 @@ def _validate_repository(expected_sha: str) -> dict[str, Any]:
         "required_commit": REQUIRED_PCP_COMMIT,
         "required_commit_is_ancestor": True,
     }
+    if workload == "sparse":
+        sparse_ancestor = _run_command(
+            [
+                "git",
+                "merge-base",
+                "--is-ancestor",
+                REQUIRED_SPARSE_DCP_COMMIT,
+                "HEAD",
+            ]
+        )
+        if sparse_ancestor["returncode"] != 0:
+            raise RuntimeError(
+                "Sparse workload requires the local PR #46514 overlay commit "
+                f"{REQUIRED_SPARSE_DCP_COMMIT}."
+            )
+        evidence.update(
+            {
+                "sparse_dcp_pr": "https://github.com/vllm-project/vllm/pull/46514",
+                "sparse_dcp_overlay_commit": REQUIRED_SPARSE_DCP_COMMIT,
+                "sparse_dcp_overlay_is_ancestor": True,
+            }
+        )
+    return evidence
 
 
 def _snapshot_patch(output_path: Path) -> None:
@@ -169,6 +196,7 @@ def _collect_environment() -> dict[str, Any]:
                 "CUDA_VISIBLE_DEVICES",
                 "VLLM_NVTX_SCOPES_FOR_PROFILING",
                 "PCP_DCP_MLA_PROFILE",
+                "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS",
                 "NCCL_DEBUG",
                 "NCCL_ALGO",
                 "NCCL_PROTO",
@@ -197,7 +225,7 @@ def _collect_environment() -> dict[str, Any]:
     }
 
 
-def _validate_hf_config(config: dict[str, Any]) -> None:
+def _validate_hf_config(config: dict[str, Any], workload: str) -> None:
     expected = {
         "num_hidden_layers": 1,
         "hidden_size": HIDDEN_SIZE,
@@ -214,8 +242,23 @@ def _validate_hf_config(config: dict[str, Any]) -> None:
     }
     if mismatches:
         raise RuntimeError(f"DeepSeek-V3 geometry mismatch: {mismatches}")
-    if "index_topk" in config:
+    if workload == "dense" and "index_topk" in config:
         raise RuntimeError("The selected config contains index_topk and is sparse MLA.")
+    if workload == "sparse":
+        sparse_expected = {
+            "index_topk": SPARSE_TOPK_TOKENS,
+            "index_head_dim": SPARSE_INDEX_HEAD_DIM,
+            "model_type": "deepseek_v32",
+        }
+        sparse_mismatches = {
+            key: {"expected": value, "actual": config.get(key)}
+            for key, value in sparse_expected.items()
+            if config.get(key) != value
+        }
+        if sparse_mismatches:
+            raise RuntimeError(
+                f"DeepSeek-V3.2 sparse geometry mismatch: {sparse_mismatches}"
+            )
     if config.get("first_k_dense_replace", 0) <= 0:
         raise RuntimeError("Layer 0 is not configured as a dense MLP layer.")
     if config.get("quantization_config") is not None:
@@ -226,14 +269,34 @@ def _validate_worker_metadata(
     rows: list[dict[str, Any]],
     expect_outer_backend: str,
     expected_source_sha: str,
+    workload: str,
 ) -> None:
     if {row["rank"] for row in rows} != {0, 1}:
         raise RuntimeError(f"Expected ranks 0 and 1, got: {rows}")
     for row in rows:
         if row["world_size"] != 2:
             raise RuntimeError(f"Expected world size 2: {row}")
-        if row["parameter_dtypes"] != ["torch.bfloat16"]:
-            raise RuntimeError(f"Weights are not exclusively BF16: {row}")
+        if workload == "dense":
+            if row["parameter_dtypes"] != ["torch.bfloat16"]:
+                raise RuntimeError(f"Weights are not exclusively BF16: {row}")
+        else:
+            if row["parameter_dtypes"] != ["torch.bfloat16", "torch.float32"]:
+                raise RuntimeError(f"Unexpected sparse-model parameter dtypes: {row}")
+            expected_fp32_parameters = {
+                "model.layers.0.self_attn.indexer.k_norm.weight": 128,
+                "model.layers.0.self_attn.indexer.k_norm.bias": 128,
+            }
+            actual_fp32_parameters = {
+                parameter["name"]: parameter["numel"]
+                for parameter in row["non_bf16_parameters"]
+            }
+            fp32_numel = row["parameter_dtype_numel"].get("torch.float32", 0)
+            if fp32_numel != 256 or actual_fp32_parameters != expected_fp32_parameters:
+                raise RuntimeError(
+                    "Sparse dummy model must retain only the two native FP32 "
+                    "indexer normalization parameters; got "
+                    f"{row['non_bf16_parameters']}"
+                )
         distribution_version = row["vllm_distribution_version"]
         wheel_commit = (
             distribution_version.split("+g", 1)[1].split(".", 1)[0]
@@ -258,8 +321,17 @@ def _validate_worker_metadata(
         if len(row["backends"]) != 1:
             raise RuntimeError(f"Expected exactly one MLA attention layer: {row}")
         backend = row["backends"][0]
-        if backend["use_sparse"]:
-            raise RuntimeError(f"Sparse MLA was selected: {backend}")
+        expected_sparse = workload == "sparse"
+        if backend["use_sparse"] != expected_sparse:
+            raise RuntimeError(
+                f"Expected use_sparse={expected_sparse}, got backend metadata: "
+                f"{backend}"
+            )
+        expected_cache_dtype = "fp8_ds_mla" if expected_sparse else "bfloat16"
+        if backend["kv_cache_dtype"] != expected_cache_dtype:
+            raise RuntimeError(
+                f"Expected {expected_cache_dtype} attention cache: {backend}"
+            )
         if expect_outer_backend != "ANY" and (
             backend["outer_backend"] != expect_outer_backend
         ):
@@ -316,19 +388,46 @@ def _validate_iteration_profile(
     profiles: list[dict[str, Any]],
     prefix_tokens: int,
     suffix_tokens: int,
+    workload: str,
 ) -> list[dict[str, Any]]:
     expected_local_q = math.ceil(suffix_tokens / (2 * PCP_SIZE)) * 2
     expected_suffix_bytes = (
         suffix_tokens // PCP_SIZE * (KV_LORA_RANK + QK_ROPE_HEAD_DIM) * 2
     )
+    if workload == "sparse":
+        expected_suffix_bytes += suffix_tokens // PCP_SIZE * SPARSE_INDEX_HEAD_DIM * 2
     expected_hidden_bytes = suffix_tokens // PCP_SIZE * HIDDEN_SIZE * 2
+    sparse_expected_bytes = {
+        "sparse_indexer_comm": (expected_local_q * SPARSE_TOPK_TOKENS * 2 * 4),
+        "attention_lse_comm": expected_local_q * NUM_ATTENTION_HEADS * 4,
+        "attention_output_comm": (
+            expected_local_q * NUM_ATTENTION_HEADS * KV_LORA_RANK * 2
+        ),
+    }
     if {profile["rank"] for profile in profiles} != {0, 1}:
         raise RuntimeError(f"Missing rank profile: {profiles}")
+
+    def validate_category(
+        profile: dict[str, Any], category: str, expected_bytes: int
+    ) -> dict[str, Any]:
+        actual_send = _record_sum(profile, category, "send_bytes")
+        actual_recv = _record_sum(profile, category, "recv_bytes")
+        if actual_send != expected_bytes or actual_recv != expected_bytes:
+            raise RuntimeError(
+                f"{category} payload mismatch: expected {expected_bytes}, "
+                f"got send={actual_send}, recv={actual_recv}: {profile}"
+            )
+        return {
+            "expected_send_bytes": expected_bytes,
+            "actual_send_bytes": actual_send,
+            "actual_recv_bytes": actual_recv,
+            "collective_count": sum(
+                record["category"] == category for record in profile["records"]
+            ),
+        }
+
     validation = []
     for profile in profiles:
-        expected_context = _expected_context_comm(
-            int(profile["rank"]), prefix_tokens, suffix_tokens
-        )
         scope_records = [
             record for record in profile["records"] if record["category"] == "scope"
         ]
@@ -347,56 +446,94 @@ def _validate_iteration_profile(
         ]
         if len(partition_records) != 1:
             raise RuntimeError(f"Expected one scheduler step: {partition_records}")
-        actual_context_bytes = _record_sum(
-            profile, "context_attention_comm", "send_bytes"
-        )
-        if actual_context_bytes != expected_context["physical_send_bytes"]:
-            raise RuntimeError(f"DCP prefix payload mismatch: {profile}")
-        actual_suffix_bytes = _record_sum(profile, "suffix_cache_comm", "send_bytes")
-        if actual_suffix_bytes != expected_suffix_bytes:
-            raise RuntimeError(f"PCP suffix payload mismatch: {profile}")
-        actual_hidden_bytes = _record_sum(profile, "hidden_restore_comm", "send_bytes")
-        if actual_hidden_bytes != expected_hidden_bytes:
-            raise RuntimeError(f"PCP hidden-restore payload mismatch: {profile}")
-        validation.append(
-            {
-                "rank": profile["rank"],
+
+        row: dict[str, Any] = {
+            "rank": profile["rank"],
+            "user_requests": 1,
+            "pcp_virtual_requests": len(
+                str(partition_records[0]["fields"]["segment_lengths"]).split("x")
+            ),
+            "local_q_tokens": expected_local_q,
+            "suffix_cache_comm": validate_category(
+                profile, "suffix_cache_comm", expected_suffix_bytes
+            ),
+            "hidden_restore_comm": validate_category(
+                profile, "hidden_restore_comm", expected_hidden_bytes
+            ),
+        }
+        if workload == "dense":
+            expected_context = _expected_context_comm(
+                int(profile["rank"]), prefix_tokens, suffix_tokens
+            )
+            context = validate_category(
+                profile,
+                "context_attention_comm",
+                expected_context["physical_send_bytes"],
+            )
+            row["context_attention_comm"] = {**expected_context, **context}
+        else:
+            if any(
+                record["category"] == "context_attention_comm"
+                for record in profile["records"]
+            ):
+                raise RuntimeError("Sparse DSA unexpectedly used dense context gather.")
+            for category, expected_bytes in sparse_expected_bytes.items():
+                row[category] = validate_category(profile, category, expected_bytes)
+            compute_records = [
+                record
+                for record in profile["records"]
+                if record["category"] == "sparse_attention_compute"
+            ]
+            if len(compute_records) != 1:
+                raise RuntimeError(
+                    f"Expected one sparse attention kernel range: {compute_records}"
+                )
+            compute_fields = compute_records[0]["fields"]
+            expected_compute_fields = {
+                "kernel": "flashmla_fp8_mixed_batch",
                 "local_q_tokens": expected_local_q,
-                "context_attention_comm": {
-                    **expected_context,
-                    "actual_send_bytes": actual_context_bytes,
-                    "actual_recv_bytes": _record_sum(
-                        profile, "context_attention_comm", "recv_bytes"
-                    ),
-                    "collective_count": sum(
-                        record["category"] == "context_attention_comm"
-                        for record in profile["records"]
-                    ),
-                },
-                "suffix_cache_comm": {
-                    "expected_send_bytes": expected_suffix_bytes,
-                    "actual_send_bytes": actual_suffix_bytes,
-                    "actual_recv_bytes": _record_sum(
-                        profile, "suffix_cache_comm", "recv_bytes"
-                    ),
-                    "collective_count": sum(
-                        record["category"] == "suffix_cache_comm"
-                        for record in profile["records"]
-                    ),
-                },
-                "hidden_restore_comm": {
-                    "expected_send_bytes": expected_hidden_bytes,
-                    "actual_send_bytes": actual_hidden_bytes,
-                    "actual_recv_bytes": _record_sum(
-                        profile, "hidden_restore_comm", "recv_bytes"
-                    ),
-                    "collective_count": sum(
-                        record["category"] == "hidden_restore_comm"
-                        for record in profile["records"]
-                    ),
-                },
+                "heads": NUM_ATTENTION_HEADS,
+                "topk_tokens": SPARSE_TOPK_TOKENS,
+                "cache_dtype": "fp8_ds_mla",
             }
-        )
+            mismatches = {
+                key: {"expected": value, "actual": compute_fields.get(key)}
+                for key, value in expected_compute_fields.items()
+                if compute_fields.get(key) != value
+            }
+            if mismatches:
+                raise RuntimeError(f"Sparse kernel path mismatch: {mismatches}")
+            row["sparse_attention_compute"] = {
+                **compute_fields,
+                "elapsed_ms": compute_records[0]["elapsed_ms"],
+            }
+            indexer_scope_records = [
+                record
+                for record in profile["records"]
+                if record["category"] == "sparse_indexer_scope"
+            ]
+            if len(indexer_scope_records) != 1:
+                raise RuntimeError(
+                    f"Expected one sparse indexer scope: {indexer_scope_records}"
+                )
+            indexer_fields = indexer_scope_records[0]["fields"]
+            expected_indexer_fields = {
+                "local_q_tokens": expected_local_q,
+                "topk_tokens": SPARSE_TOPK_TOKENS,
+                "dcp_world_size": DCP_SIZE,
+                "use_pcp": True,
+            }
+            indexer_mismatches = {
+                key: {"expected": value, "actual": indexer_fields.get(key)}
+                for key, value in expected_indexer_fields.items()
+                if indexer_fields.get(key) != value
+            }
+            if indexer_mismatches:
+                raise RuntimeError(
+                    f"Sparse indexer scope mismatch: {indexer_mismatches}"
+                )
+            row["sparse_indexer_scope"] = indexer_fields
+        validation.append(row)
     return validation
 
 
@@ -464,6 +601,7 @@ def _request_evidence(
     if len(generated_tokens) != 1:
         raise RuntimeError(f"Expected exactly one sampled token: {generated_tokens}")
     return {
+        "user_requests": 1,
         "request_id": output.request_id,
         "prompt_tokens": len(prompt_ids),
         "prompt_token_sha256_le_u32": _token_hash(prompt_ids),
@@ -514,16 +652,20 @@ def _parse_args() -> argparse.Namespace:
         choices=("smoke", "smoke-nsys", "events", "nsys"),
         default="events",
     )
-    parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3")
+    parser.add_argument("--workload", choices=("dense", "sparse"), default="dense")
+    parser.add_argument("--model")
     parser.add_argument("--revision")
     parser.add_argument("--hf-config-path")
     parser.add_argument("--prefix-tokens", type=int)
     parser.add_argument("--suffix-tokens", type=int, default=SUFFIX_TOKENS)
+    parser.add_argument("--warmup-iterations", type=int, default=1)
+    parser.add_argument("--measured-iterations", type=int)
+    parser.add_argument("--prefill-chunk-tokens", type=int, default=8_192)
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.20)
-    parser.add_argument("--attention-backend", default="FLASHMLA")
-    parser.add_argument("--expect-outer-backend", default="FLASHMLA")
+    parser.add_argument("--attention-backend")
+    parser.add_argument("--expect-outer-backend")
     parser.add_argument("--allow-non-contract-shape", action="store_true")
     parser.add_argument("--expected-git-sha", default=EXPECTED_GIT_SHA)
     return parser.parse_args()
@@ -531,7 +673,21 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-    repository_evidence = _validate_repository(args.expected_git_sha)
+    sparse = args.workload == "sparse"
+    measured_iterations = args.measured_iterations
+    if measured_iterations is None:
+        measured_iterations = 1 if args.mode.startswith("smoke") else 3
+    if args.warmup_iterations < 1 or measured_iterations < 1:
+        raise ValueError("Warmup and measured iteration counts must be positive.")
+    if args.prefill_chunk_tokens < args.suffix_tokens:
+        raise ValueError("Prefill chunk size must fit the measured suffix.")
+    model = args.model or (SPARSE_MODEL if sparse else "deepseek-ai/DeepSeek-V3")
+    attention_backend = args.attention_backend or (
+        "FLASHMLA_SPARSE" if sparse else "FLASHMLA"
+    )
+    expect_outer_backend = args.expect_outer_backend or attention_backend
+    kv_cache_dtype = "fp8_ds_mla" if sparse else "bfloat16"
+    repository_evidence = _validate_repository(args.expected_git_sha, args.workload)
     smoke = args.mode.startswith("smoke")
     capture = args.mode in ("smoke-nsys", "nsys")
     prefix_tokens = args.prefix_tokens or (
@@ -557,30 +713,40 @@ def main() -> None:
     metadata = _collect_environment()
     metadata["experiment"] = {
         "mode": args.mode,
-        "model": args.model,
+        "workload": args.workload,
+        "model": model,
         "revision": args.revision,
         "hf_config_path": args.hf_config_path,
         "prefix_tokens": prefix_tokens,
         "suffix_tokens": args.suffix_tokens,
+        "warmup_iterations": args.warmup_iterations,
+        "measured_iterations": measured_iterations,
+        "prefill_chunk_tokens": args.prefill_chunk_tokens,
         "max_model_len": MAX_MODEL_LEN,
-        "weight_format": "dummy unquantized BF16",
+        "weight_format": (
+            "dummy unquantized BF16 with native sparse FP32 parameters"
+            if sparse
+            else "dummy unquantized BF16"
+        ),
         "activation_dtype": "bfloat16",
-        "kv_cache_dtype": "bfloat16",
-        "attention_backend_request": args.attention_backend,
+        "kv_cache_dtype": kv_cache_dtype,
+        "user_requests_per_generate": 1,
+        "max_num_seqs": 1,
+        "attention_backend_request": attention_backend,
         "mla_prefill_backend_request": "auto",
-        "expected_outer_backend": args.expect_outer_backend,
+        "expected_outer_backend": expect_outer_backend,
         "repository_requirement": repository_evidence,
     }
     _write_json(output_dir / "environment.json", metadata)
     _snapshot_patch(output_dir / "local_changes.patch")
 
     engine_kwargs = {
-        "model": args.model,
+        "model": model,
         "revision": args.revision,
         "skip_tokenizer_init": True,
         "load_format": "dummy",
         "dtype": "bfloat16",
-        "kv_cache_dtype": "bfloat16",
+        "kv_cache_dtype": kv_cache_dtype,
         "hf_overrides": {
             "num_hidden_layers": 1,
             "num_nextn_predict_layers": 0,
@@ -597,13 +763,16 @@ def main() -> None:
         "enable_prefix_caching": True,
         "enable_chunked_prefill": True,
         "max_model_len": MAX_MODEL_LEN,
-        "max_num_batched_tokens": 8_192,
+        "max_num_batched_tokens": args.prefill_chunk_tokens,
         "max_num_seqs": 1,
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "enforce_eager": True,
         "compilation_config": {"cudagraph_mode": "NONE"},
         "enable_layerwise_nvtx_tracing": True,
-        "attention_config": {"backend": args.attention_backend},
+        "attention_config": {
+            "backend": attention_backend,
+            "sparse_mla_force_mqa": sparse,
+        },
         "disable_log_stats": False,
         "seed": args.seed,
     }
@@ -624,25 +793,27 @@ def main() -> None:
     llm = LLM(**engine_kwargs)
     hf_config = llm.model_config.hf_config.to_dict()
     _write_json(output_dir / "resolved_hf_config.json", hf_config)
-    _validate_hf_config(hf_config)
+    _validate_hf_config(hf_config, args.workload)
 
     worker_metadata = llm.collective_rpc("pcp_dcp_mla_profile_metadata")
     _write_json(output_dir / "worker_metadata.json", worker_metadata)
     _validate_worker_metadata(
         worker_metadata,
-        args.expect_outer_backend.upper(),
+        expect_outer_backend.upper(),
         args.expected_git_sha,
+        args.workload,
     )
 
     vocab_size = int(hf_config["vocab_size"])
     prefix = _make_prefix(prefix_tokens, vocab_size, args.seed)
-    suffix_specs = [("warmup_0", 101)]
-    measured_count = 1 if smoke else 3
+    suffix_specs = [
+        (f"warmup_{index}", 101 + index) for index in range(args.warmup_iterations)
+    ]
     if capture:
         suffix_specs.append(("nsys_0" if not smoke else "smoke_nsys_0", 301))
     else:
         suffix_specs.extend(
-            (f"measure_{index}", 201 + index) for index in range(measured_count)
+            (f"measure_{index}", 201 + index) for index in range(measured_iterations)
         )
     suffixes = {
         label: _make_suffix(args.suffix_tokens, vocab_size, args.seed, variant)
@@ -657,6 +828,10 @@ def main() -> None:
     ) as file:
         json.dump(token_payload, file, separators=(",", ":"))
     workload = {
+        "workload": args.workload,
+        "user_requests_per_generate": 1,
+        "max_num_seqs": 1,
+        "pcp_virtual_requests_per_rank": 2,
         "prefix_tokens": len(prefix),
         "prefix_sha256_le_u32": _token_hash(prefix),
         "suffixes": {
@@ -685,8 +860,17 @@ def main() -> None:
         raise RuntimeError(f"Expected one priming output: {prime_outputs}")
     prime_evidence = _request_evidence(prime_outputs[0], prefix, 0)
     results: dict[str, Any] = {
+        "contract": {
+            "workload": args.workload,
+            "user_requests_per_generate": 1,
+            "max_num_seqs": 1,
+            "pcp_virtual_requests_per_rank": 2,
+            "warmup_iterations": args.warmup_iterations,
+            "measured_iterations": measured_iterations,
+        },
         "prime": {"frontend_wall_ms": prime_wall_ms, "request": prime_evidence},
         "warmup": None,
+        "warmups": [],
         "measured": [],
     }
     _write_json(output_dir / "results.json", results)
@@ -704,10 +888,14 @@ def main() -> None:
             is_capture_iteration,
         )
         iteration["profile_validation"] = _validate_iteration_profile(
-            iteration["profiles"], prefix_tokens, args.suffix_tokens
+            iteration["profiles"],
+            prefix_tokens,
+            args.suffix_tokens,
+            args.workload,
         )
-        if label == "warmup_0":
+        if label.startswith("warmup_"):
             results["warmup"] = iteration
+            results["warmups"].append(iteration)
         else:
             results["measured"].append(iteration)
         _write_json(output_dir / "results.json", results)

@@ -1,0 +1,75 @@
+{
+  "max_num_seqs": 1,
+  "pcp_virtual_requests_per_rank": 2,
+  "prefix_sha256_le_u32": "88c57761770ab1336c3ff99043b893bb44a2668ec9a63ce0e29f4868f48419dc",
+  "prefix_tokens": 40960,
+  "suffixes": {
+    "measure_0": {
+      "first_token": 20009,
+      "sha256_le_u32": "585256a02ff7caab5f35f652ebe3b82534cd5c874c70686049c4a155830b6e20",
+      "tokens": 256
+    },
+    "measure_1": {
+      "first_token": 20106,
+      "sha256_le_u32": "547954153661123c256304d5814a2928723683035604e28fe93933733032218a",
+      "tokens": 256
+    },
+    "measure_2": {
+      "first_token": 20203,
+      "sha256_le_u32": "33b5e96eed78f1831811ac18c455277b37b31dfc9b9b340a9a6b1d5fb78a1de3",
+      "tokens": 256
+    },
+    "measure_3": {
+      "first_token": 20300,
+      "sha256_le_u32": "b12655d794b7df419967001888e604059bb11c16416abc16054a7788f3f5f252",
+      "tokens": 256
+    },
+    "measure_4": {
+      "first_token": 20397,
+      "sha256_le_u32": "16d543a14360b47b327af22fb090afd13897a43e889ff3e08239878ebe35802c",
+      "tokens": 256
+    },
+    "warmup_0": {
+      "first_token": 10309,
+      "sha256_le_u32": "b2148cec3fbe8a305f9982454f178887156adfa5578f49f55123ab4e51320daa",
+      "tokens": 256
+    },
+    "warmup_1": {
+      "first_token": 10406,
+      "sha256_le_u32": "03c4135f3ac1721548517f917f8b3457b48f47bc0096b3be580202c6df561a40",
+      "tokens": 256
+    },
+    "warmup_2": {
+      "first_token": 10503,
+      "sha256_le_u32": "9ee9c3a80ade5ffea30c8673b2c2e02556513d5b05dcdb1c9ccffeca2167ddb1",
+      "tokens": 256
+    },
+    "warmup_3": {
+      "first_token": 10600,
+      "sha256_le_u32": "5446603899dd95d7647a077120823f66c14040db8402df6e17d7928359f94ab2",
+      "tokens": 256
+    },
+    "warmup_4": {
+      "first_token": 10697,
+      "sha256_le_u32": "9555637bde4e66ea2f3bec1744ca3a0e04e68a9e9f75b99a1fa071b1c05fd67f",
+      "tokens": 256
+    },
+    "warmup_5": {
+      "first_token": 10794,
+      "sha256_le_u32": "1da1b4ab7f4827070fa9e382d3594c9065afc420996010bf58ea92fd982e9459",
+      "tokens": 256
+    },
+    "warmup_6": {
+      "first_token": 10891,
+      "sha256_le_u32": "8fbaf775534bf7f6a8bb27330404c9947fbaad1ed914ff7d52524b95ab5e4e65",
+      "tokens": 256
+    },
+    "warmup_7": {
+      "first_token": 10988,
+      "sha256_le_u32": "d66624d0745c8e1bd813c98b49f99f97e4afe2e9e233d04031d6bd182b1093d4",
+      "tokens": 256
+    }
+  },
+  "user_requests_per_generate": 1,
+  "workload": "sparse"
+}

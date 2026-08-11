@@ -1,0 +1,15 @@
+{
+  "format": "vllm-nsys-environment-redaction-v2",
+  "minimum_credential_value_bytes": 8,
+  "redacted_environment_variables": [
+    "GIT_CONFIG_KEY_0",
+    "PUBLIC_KEY",
+    "RUNPOD_API_KEY",
+    "VSCODE_CLI_REQUIRE_TOKEN"
+  ],
+  "redacted_string_occurrences": 4,
+  "replacement": "credential-like captured environment values replaced by same-length ASCII asterisks",
+  "report_size_bytes": 143355,
+  "sanitized_report_sha256": "edcda1aa9525cfc38af107ad8d97608f6ddf0b658b70c2a2a149844c5cf9f434",
+  "source_report_sha256": "8b594a352f54cacd4d4a106a9bffe8f3165bf3b60539cae7dec8e290bc96ec1a"
+}

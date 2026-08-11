@@ -113,6 +113,25 @@ def timed_range(category: str, **fields: Any):
         )
 
 
+@contextmanager
+def annotation_range(category: str, **fields: Any):
+    """Emit an NVTX range without inserting CUDA timing events."""
+    if _STATE.active_label is None:
+        yield
+        return
+
+    normalized = {key: _json_value(value) for key, value in fields.items()}
+    message = _message(category, normalized)
+    torch.cuda.nvtx.range_push(message)
+    try:
+        yield
+    finally:
+        torch.cuda.nvtx.range_pop()
+        _STATE.records.append(
+            _PendingRecord(category=category, fields=normalized, message=message)
+        )
+
+
 def mark(category: str, **fields: Any) -> None:
     if _STATE.active_label is None:
         return
@@ -190,9 +209,26 @@ def _worker_metadata(worker) -> dict[str, Any]:
                 "use_sparse": layer.use_sparse,
             }
         )
+    named_parameters = list(model.named_parameters())
     parameter_dtypes = sorted(
-        {str(parameter.dtype) for parameter in model.parameters()}
+        {str(parameter.dtype) for _, parameter in named_parameters}
     )
+    parameter_dtype_numel: dict[str, int] = {}
+    for _, parameter in named_parameters:
+        dtype = str(parameter.dtype)
+        parameter_dtype_numel[dtype] = (
+            parameter_dtype_numel.get(dtype, 0) + parameter.numel()
+        )
+    non_bf16_parameters = [
+        {
+            "name": name,
+            "dtype": str(parameter.dtype),
+            "shape": list(parameter.shape),
+            "numel": parameter.numel(),
+        }
+        for name, parameter in named_parameters
+        if parameter.dtype != torch.bfloat16
+    ]
     nccl_version = torch.cuda.nccl.version() if torch.cuda.is_available() else None
     return {
         "rank": _rank(),
@@ -208,6 +244,8 @@ def _worker_metadata(worker) -> dict[str, Any]:
         "vllm_version": str(vllm.__version__),
         "vllm_distribution_version": importlib.metadata.version("vllm"),
         "parameter_dtypes": parameter_dtypes,
+        "parameter_dtype_numel": parameter_dtype_numel,
+        "non_bf16_parameters": non_bf16_parameters,
         "load_format": str(config.load_config.load_format),
         "model_dtype": str(config.model_config.dtype),
         "quantization": config.model_config.quantization,

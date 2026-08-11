@@ -18,6 +18,7 @@ from vllm.model_executor.layers.quantization.utils.quant_utils import (
     get_fp8_min_max,
 )
 from vllm.platforms import current_platform
+from vllm.profiler.pcp_dcp_mla import annotation_range, timed_range
 from vllm.triton_utils import tl, triton
 from vllm.utils.deep_gemm import (
     fp8_fp4_mqa_logits,
@@ -118,7 +119,20 @@ def _merge_dcp_topk_global(
         cp_interleave,
         row_starts,
     )
-    gathered = get_dcp_group().all_gather(packed, dim=1)
+    local_bytes = packed.numel() * packed.element_size()
+    with timed_range(
+        "sparse_indexer_comm",
+        collective="dcp_all_gather",
+        local_q_tokens=topk_indices.shape[0],
+        topk_tokens=topk_tokens,
+        candidate_fields=packed.shape[-1],
+        dtype=packed.dtype,
+        element_size=packed.element_size(),
+        world_size=dcp_world_size,
+        send_bytes=local_bytes * (dcp_world_size - 1),
+        recv_bytes=local_bytes * (dcp_world_size - 1),
+    ):
+        gathered = get_dcp_group().all_gather(packed, dim=1)
     stable_topk_from_gathered_candidates_cutedsl(
         gathered, topk_tokens, out=topk_indices
     )
@@ -806,29 +820,36 @@ class SparseAttnIndexer(CustomOp):
             q_values, q_scale = q_quant
         else:
             q_values, q_scale = q_quant, None
-        return torch.ops.vllm.sparse_attn_indexer(
-            hidden_states,
-            _encode_layer_name(self.k_cache.prefix),
-            self.k_cache.kv_cache,
-            q_values,
-            q_scale,
-            k,
-            weights,
-            self.quant_block_size,
-            self.scale_fmt,
-            self.topk_tokens,
-            self.head_dim,
-            self.max_model_len,
-            self.max_total_seq_len,
-            self.topk_indices_buffer,
-            self.skip_k_cache_insert,
-            self.use_pcp,
-            _encode_layer_name(self.dense_mha_metadata_layer_name),
-            self.use_fp4_cache,
-            self.dcp_rank,
-            self.dcp_world_size,
-            self.cp_kv_cache_interleave_size,
-        )
+        with annotation_range(
+            "sparse_indexer_scope",
+            local_q_tokens=hidden_states.shape[0],
+            topk_tokens=self.topk_tokens,
+            dcp_world_size=self.dcp_world_size,
+            use_pcp=self.use_pcp,
+        ):
+            return torch.ops.vllm.sparse_attn_indexer(
+                hidden_states,
+                _encode_layer_name(self.k_cache.prefix),
+                self.k_cache.kv_cache,
+                q_values,
+                q_scale,
+                k,
+                weights,
+                self.quant_block_size,
+                self.scale_fmt,
+                self.topk_tokens,
+                self.head_dim,
+                self.max_model_len,
+                self.max_total_seq_len,
+                self.topk_indices_buffer,
+                self.skip_k_cache_insert,
+                self.use_pcp,
+                _encode_layer_name(self.dense_mha_metadata_layer_name),
+                self.use_fp4_cache,
+                self.dcp_rank,
+                self.dcp_world_size,
+                self.cp_kv_cache_interleave_size,
+            )
 
     def forward_xpu(
         self,
