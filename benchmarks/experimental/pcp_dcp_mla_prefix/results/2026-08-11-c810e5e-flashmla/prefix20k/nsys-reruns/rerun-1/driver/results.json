@@ -1,0 +1,675 @@
+{
+  "event_summary": {
+    "full_layer": {
+      "iterations": [
+        {
+          "label": "nsys_0",
+          "max_rank_ms": 8.851584434509277,
+          "rank_ms": {
+            "0": 8.851584434509277,
+            "1": 7.992127895355225
+          }
+        }
+      ],
+      "max_rank_mean_ms": 8.851584434509277,
+      "max_rank_p50_ms": 8.851584434509277,
+      "max_rank_p90_ms": 8.851584434509277,
+      "max_rank_stdev_ms": 0.0
+    },
+    "self_attn": {
+      "iterations": [
+        {
+          "label": "nsys_0",
+          "max_rank_ms": 8.321439743041992,
+          "rank_ms": {
+            "0": 8.321439743041992,
+            "1": 7.430208206176758
+          }
+        }
+      ],
+      "max_rank_mean_ms": 8.321439743041992,
+      "max_rank_p50_ms": 8.321439743041992,
+      "max_rank_p90_ms": 8.321439743041992,
+      "max_rank_stdev_ms": 0.0
+    }
+  },
+  "measured": [
+    {
+      "armed": [
+        {
+          "armed": true,
+          "label": "nsys_0",
+          "rank": 0
+        },
+        {
+          "armed": true,
+          "label": "nsys_0",
+          "rank": 1
+        }
+      ],
+      "frontend_wall_ms": 4367.079329676926,
+      "label": "nsys_0",
+      "profile_validation": [
+        {
+          "context_attention_comm": {
+            "actual_recv_bytes": 23703552,
+            "actual_send_bytes": 23703552,
+            "collective_count": 1,
+            "pcp_chunk_indices": [
+              0,
+              3
+            ],
+            "physical_global_context_rows": 41152,
+            "physical_local_context_rows": 20576,
+            "physical_send_bytes": 23703552,
+            "physical_to_unique_prefix_ratio": 2.009375,
+            "unique_prefix_send_bytes": 11796480,
+            "virtual_context_tokens": [
+              20480,
+              20672
+            ]
+          },
+          "hidden_restore_comm": {
+            "actual_recv_bytes": 1835008,
+            "actual_send_bytes": 1835008,
+            "collective_count": 1,
+            "expected_send_bytes": 1835008
+          },
+          "local_q_tokens": 128,
+          "rank": 0,
+          "suffix_cache_comm": {
+            "actual_recv_bytes": 147456,
+            "actual_send_bytes": 147456,
+            "collective_count": 2,
+            "expected_send_bytes": 147456
+          }
+        },
+        {
+          "context_attention_comm": {
+            "actual_recv_bytes": 23703552,
+            "actual_send_bytes": 23703552,
+            "collective_count": 1,
+            "pcp_chunk_indices": [
+              1,
+              2
+            ],
+            "physical_global_context_rows": 41152,
+            "physical_local_context_rows": 20576,
+            "physical_send_bytes": 23703552,
+            "physical_to_unique_prefix_ratio": 2.009375,
+            "unique_prefix_send_bytes": 11796480,
+            "virtual_context_tokens": [
+              20544,
+              20608
+            ]
+          },
+          "hidden_restore_comm": {
+            "actual_recv_bytes": 1835008,
+            "actual_send_bytes": 1835008,
+            "collective_count": 1,
+            "expected_send_bytes": 1835008
+          },
+          "local_q_tokens": 128,
+          "rank": 1,
+          "suffix_cache_comm": {
+            "actual_recv_bytes": 147456,
+            "actual_send_bytes": 147456,
+            "collective_count": 2,
+            "expected_send_bytes": 147456
+          }
+        }
+      ],
+      "profiles": [
+        {
+          "device": 0,
+          "label": "nsys_0",
+          "rank": 0,
+          "records": [
+            {
+              "category": "pcp_partition",
+              "elapsed_ms": null,
+              "fields": {
+                "computed_tokens": "20480",
+                "local_tokens": 128,
+                "padded_local_tokens": 128,
+                "scheduled_tokens": "256",
+                "segment_lengths": "64x64",
+                "segment_slices": "0:64,192:256"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=nsys_0|rank=0|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=0:64,192:256|scheduled_tokens=256|computed_tokens=20480"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 1.3983999490737915,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 131072,
+                "send_bytes": 131072,
+                "tensor": "kv_c_normed",
+                "width": 512,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=nsys_0|rank=0|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.32441601157188416,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 16384,
+                "send_bytes": 16384,
+                "tensor": "k_pe",
+                "width": 64,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=nsys_0|rank=0|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.796288013458252,
+              "fields": {
+                "chunk": 0,
+                "collective": "dcp_all_gather",
+                "context_tokens": 41152,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 20576,
+                "recv_bytes": 23703552,
+                "requests": 2,
+                "send_bytes": 23703552,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=nsys_0|rank=0|collective=dcp_all_gather|chunk=0|requests=2|local_tokens=20576|context_tokens=41152|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=23703552|recv_bytes=23703552"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 8.321439743041992,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": "model.layers.0.self_attn",
+                "local_q_tokens": 128,
+                "scope": "self_attn"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=nsys_0|rank=0|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 8.851584434509277,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": 0,
+                "local_q_tokens": 128,
+                "scope": "full_layer"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=nsys_0|rank=0|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "hidden_restore_comm",
+              "elapsed_ms": 0.127360001206398,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 1835008,
+                "send_bytes": 1835008,
+                "width": 7168,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=nsys_0|rank=0|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+            }
+          ]
+        },
+        {
+          "device": 1,
+          "label": "nsys_0",
+          "rank": 1,
+          "records": [
+            {
+              "category": "pcp_partition",
+              "elapsed_ms": null,
+              "fields": {
+                "computed_tokens": "20480",
+                "local_tokens": 128,
+                "padded_local_tokens": 128,
+                "scheduled_tokens": "256",
+                "segment_lengths": "64x64",
+                "segment_slices": "64:128,128:192"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=nsys_0|rank=1|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=64:128,128:192|scheduled_tokens=256|computed_tokens=20480"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.3312000036239624,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 131072,
+                "send_bytes": 131072,
+                "tensor": "kv_c_normed",
+                "width": 512,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=nsys_0|rank=1|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+            },
+            {
+              "category": "suffix_cache_comm",
+              "elapsed_ms": 0.1470080018043518,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 16384,
+                "send_bytes": 16384,
+                "tensor": "k_pe",
+                "width": 64,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=nsys_0|rank=1|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+            },
+            {
+              "category": "context_attention_comm",
+              "elapsed_ms": 0.12556800246238708,
+              "fields": {
+                "chunk": 0,
+                "collective": "dcp_all_gather",
+                "context_tokens": 41152,
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 20576,
+                "recv_bytes": 23703552,
+                "requests": 2,
+                "send_bytes": 23703552,
+                "width": 576,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=nsys_0|rank=1|collective=dcp_all_gather|chunk=0|requests=2|local_tokens=20576|context_tokens=41152|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=23703552|recv_bytes=23703552"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 7.430208206176758,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": "model.layers.0.self_attn",
+                "local_q_tokens": 128,
+                "scope": "self_attn"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=nsys_0|rank=1|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "scope",
+              "elapsed_ms": 7.992127895355225,
+              "fields": {
+                "activation_dtype": "torch.bfloat16",
+                "layer": 0,
+                "local_q_tokens": 128,
+                "scope": "full_layer"
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=nsys_0|rank=1|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+            },
+            {
+              "category": "hidden_restore_comm",
+              "elapsed_ms": 0.036288000643253326,
+              "fields": {
+                "collective": "pcp_all_gather",
+                "dtype": "torch.bfloat16",
+                "element_size": 2,
+                "local_tokens": 128,
+                "recv_bytes": 1835008,
+                "send_bytes": 1835008,
+                "width": 7168,
+                "world_size": 2
+              },
+              "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=nsys_0|rank=1|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+            }
+          ]
+        }
+      ],
+      "request": {
+        "finished": true,
+        "num_cache_creation_tokens": 256,
+        "num_cached_tokens": 20480,
+        "num_computed_prompt_tokens": 256,
+        "prompt_token_sha256_le_u32": "9eb07d1d565f6f13d47d8074c28f607eba32977f0afbb99af71f780a0400e1a3",
+        "prompt_tokens": 20736,
+        "request_id": "2",
+        "sampled_token_id": 23480
+      }
+    }
+  ],
+  "prime": {
+    "frontend_wall_ms": 598.0622880160809,
+    "request": {
+      "finished": true,
+      "num_cache_creation_tokens": 20480,
+      "num_cached_tokens": 0,
+      "num_computed_prompt_tokens": 20480,
+      "prompt_token_sha256_le_u32": "fb8365ab80a0f811eabb3a4a3c3cfabac1ff8844488b5e8c0749674eebdd508a",
+      "prompt_tokens": 20480,
+      "request_id": "0",
+      "sampled_token_id": 83815
+    }
+  },
+  "warmup": {
+    "armed": [
+      {
+        "armed": true,
+        "label": "warmup_0",
+        "rank": 0
+      },
+      {
+        "armed": true,
+        "label": "warmup_0",
+        "rank": 1
+      }
+    ],
+    "frontend_wall_ms": 41.12016223371029,
+    "label": "warmup_0",
+    "profile_validation": [
+      {
+        "context_attention_comm": {
+          "actual_recv_bytes": 23703552,
+          "actual_send_bytes": 23703552,
+          "collective_count": 1,
+          "pcp_chunk_indices": [
+            0,
+            3
+          ],
+          "physical_global_context_rows": 41152,
+          "physical_local_context_rows": 20576,
+          "physical_send_bytes": 23703552,
+          "physical_to_unique_prefix_ratio": 2.009375,
+          "unique_prefix_send_bytes": 11796480,
+          "virtual_context_tokens": [
+            20480,
+            20672
+          ]
+        },
+        "hidden_restore_comm": {
+          "actual_recv_bytes": 1835008,
+          "actual_send_bytes": 1835008,
+          "collective_count": 1,
+          "expected_send_bytes": 1835008
+        },
+        "local_q_tokens": 128,
+        "rank": 0,
+        "suffix_cache_comm": {
+          "actual_recv_bytes": 147456,
+          "actual_send_bytes": 147456,
+          "collective_count": 2,
+          "expected_send_bytes": 147456
+        }
+      },
+      {
+        "context_attention_comm": {
+          "actual_recv_bytes": 23703552,
+          "actual_send_bytes": 23703552,
+          "collective_count": 1,
+          "pcp_chunk_indices": [
+            1,
+            2
+          ],
+          "physical_global_context_rows": 41152,
+          "physical_local_context_rows": 20576,
+          "physical_send_bytes": 23703552,
+          "physical_to_unique_prefix_ratio": 2.009375,
+          "unique_prefix_send_bytes": 11796480,
+          "virtual_context_tokens": [
+            20544,
+            20608
+          ]
+        },
+        "hidden_restore_comm": {
+          "actual_recv_bytes": 1835008,
+          "actual_send_bytes": 1835008,
+          "collective_count": 1,
+          "expected_send_bytes": 1835008
+        },
+        "local_q_tokens": 128,
+        "rank": 1,
+        "suffix_cache_comm": {
+          "actual_recv_bytes": 147456,
+          "actual_send_bytes": 147456,
+          "collective_count": 2,
+          "expected_send_bytes": 147456
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "device": 0,
+        "label": "warmup_0",
+        "rank": 0,
+        "records": [
+          {
+            "category": "pcp_partition",
+            "elapsed_ms": null,
+            "fields": {
+              "computed_tokens": "20480",
+              "local_tokens": 128,
+              "padded_local_tokens": 128,
+              "scheduled_tokens": "256",
+              "segment_lengths": "64x64",
+              "segment_slices": "0:64,192:256"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=warmup_0|rank=0|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=0:64,192:256|scheduled_tokens=256|computed_tokens=20480"
+          },
+          {
+            "category": "suffix_cache_comm",
+            "elapsed_ms": 0.22303999960422516,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 131072,
+              "send_bytes": 131072,
+              "tensor": "kv_c_normed",
+              "width": 512,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=warmup_0|rank=0|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+          },
+          {
+            "category": "suffix_cache_comm",
+            "elapsed_ms": 0.14927999675273895,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 16384,
+              "send_bytes": 16384,
+              "tensor": "k_pe",
+              "width": 64,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=warmup_0|rank=0|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+          },
+          {
+            "category": "context_attention_comm",
+            "elapsed_ms": 0.12409599870443344,
+            "fields": {
+              "chunk": 0,
+              "collective": "dcp_all_gather",
+              "context_tokens": 41152,
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 20576,
+              "recv_bytes": 23703552,
+              "requests": 2,
+              "send_bytes": 23703552,
+              "width": 576,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=warmup_0|rank=0|collective=dcp_all_gather|chunk=0|requests=2|local_tokens=20576|context_tokens=41152|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=23703552|recv_bytes=23703552"
+          },
+          {
+            "category": "scope",
+            "elapsed_ms": 17.941247940063477,
+            "fields": {
+              "activation_dtype": "torch.bfloat16",
+              "layer": "model.layers.0.self_attn",
+              "local_q_tokens": 128,
+              "scope": "self_attn"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=warmup_0|rank=0|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+          },
+          {
+            "category": "scope",
+            "elapsed_ms": 22.50281524658203,
+            "fields": {
+              "activation_dtype": "torch.bfloat16",
+              "layer": 0,
+              "local_q_tokens": 128,
+              "scope": "full_layer"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=warmup_0|rank=0|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+          },
+          {
+            "category": "hidden_restore_comm",
+            "elapsed_ms": 0.5636799931526184,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 1835008,
+              "send_bytes": 1835008,
+              "width": 7168,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=warmup_0|rank=0|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+          }
+        ]
+      },
+      {
+        "device": 1,
+        "label": "warmup_0",
+        "rank": 1,
+        "records": [
+          {
+            "category": "pcp_partition",
+            "elapsed_ms": null,
+            "fields": {
+              "computed_tokens": "20480",
+              "local_tokens": 128,
+              "padded_local_tokens": 128,
+              "scheduled_tokens": "256",
+              "segment_lengths": "64x64",
+              "segment_slices": "64:128,128:192"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=pcp_partition|iteration=warmup_0|rank=1|local_tokens=128|padded_local_tokens=128|segment_lengths=64x64|segment_slices=64:128,128:192|scheduled_tokens=256|computed_tokens=20480"
+          },
+          {
+            "category": "suffix_cache_comm",
+            "elapsed_ms": 0.5794559717178345,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 131072,
+              "send_bytes": 131072,
+              "tensor": "kv_c_normed",
+              "width": 512,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=warmup_0|rank=1|collective=pcp_all_gather|tensor=kv_c_normed|local_tokens=128|width=512|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=131072|recv_bytes=131072"
+          },
+          {
+            "category": "suffix_cache_comm",
+            "elapsed_ms": 0.2850559949874878,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 16384,
+              "send_bytes": 16384,
+              "tensor": "k_pe",
+              "width": 64,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=suffix_cache_comm|iteration=warmup_0|rank=1|collective=pcp_all_gather|tensor=k_pe|local_tokens=128|width=64|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=16384|recv_bytes=16384"
+          },
+          {
+            "category": "context_attention_comm",
+            "elapsed_ms": 0.6867520213127136,
+            "fields": {
+              "chunk": 0,
+              "collective": "dcp_all_gather",
+              "context_tokens": 41152,
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 20576,
+              "recv_bytes": 23703552,
+              "requests": 2,
+              "send_bytes": 23703552,
+              "width": 576,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=context_attention_comm|iteration=warmup_0|rank=1|collective=dcp_all_gather|chunk=0|requests=2|local_tokens=20576|context_tokens=41152|width=576|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=23703552|recv_bytes=23703552"
+          },
+          {
+            "category": "scope",
+            "elapsed_ms": 17.34726333618164,
+            "fields": {
+              "activation_dtype": "torch.bfloat16",
+              "layer": "model.layers.0.self_attn",
+              "local_q_tokens": 128,
+              "scope": "self_attn"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=warmup_0|rank=1|scope=self_attn|layer=model.layers.0.self_attn|local_q_tokens=128|activation_dtype=torch.bfloat16"
+          },
+          {
+            "category": "scope",
+            "elapsed_ms": 21.732032775878906,
+            "fields": {
+              "activation_dtype": "torch.bfloat16",
+              "layer": 0,
+              "local_q_tokens": 128,
+              "scope": "full_layer"
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=scope|iteration=warmup_0|rank=1|scope=full_layer|layer=0|local_q_tokens=128|activation_dtype=torch.bfloat16"
+          },
+          {
+            "category": "hidden_restore_comm",
+            "elapsed_ms": 1.51801598072052,
+            "fields": {
+              "collective": "pcp_all_gather",
+              "dtype": "torch.bfloat16",
+              "element_size": 2,
+              "local_tokens": 128,
+              "recv_bytes": 1835008,
+              "send_bytes": 1835008,
+              "width": 7168,
+              "world_size": 2
+            },
+            "message": "VLLM_PCP_DCP_MLA|category=hidden_restore_comm|iteration=warmup_0|rank=1|collective=pcp_all_gather|local_tokens=128|width=7168|dtype=torch.bfloat16|element_size=2|world_size=2|send_bytes=1835008|recv_bytes=1835008"
+          }
+        ]
+      }
+    ],
+    "request": {
+      "finished": true,
+      "num_cache_creation_tokens": 256,
+      "num_cached_tokens": 20480,
+      "num_computed_prompt_tokens": 256,
+      "prompt_token_sha256_le_u32": "cf853640ceef08d68e76524ea7f31ee393d894b0cd02537004add233e0a05047",
+      "prompt_tokens": 20736,
+      "request_id": "1",
+      "sampled_token_id": 105264
+    }
+  }
+}

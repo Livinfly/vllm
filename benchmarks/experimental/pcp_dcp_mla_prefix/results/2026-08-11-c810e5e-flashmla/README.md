@@ -5,7 +5,8 @@
 The experiment completed on 2026-08-11 UTC for 20K, 40K, and 80K cached
 prefixes, each followed by a 256-token computed suffix. Every ordinary run used
 one warmup and three measured suffixes. Every Nsight Systems run used another
-warmup and exactly one separately captured suffix.
+warmup and exactly one separately captured suffix. After the initial sweep,
+20K was captured three more times to test the stability of its attribution.
 
 Both workers resolved the explicitly requested outer backend to `FLASHMLA`
 with `FlashMLAImpl`; its prefill backend was `FLASH_ATTN`. PCP and dense
@@ -33,6 +34,7 @@ the two backends' decode kernels.
 | Python | 3.12.3 through `.venv/bin/python` |
 | Precompiled source SHA | `c810e5ee9976ad86b81d1277b53e76d0ee639414` |
 | Experiment-code HEAD | `14e4fa7a97866ebf156bdb07192dfdff31458252` plus the recorded local patch |
+| 20K repeat-capture HEAD | `bc0b57a94041d3f7bf770a4977462466cd07bb1a` |
 | `origin/main` at run | `e644c8cd8c734bf3b5e662a4bc363cfa8524d821` |
 | Required PCP commit | `b6ff8a2f509cc7ac9c58176f5115a836aa1e08bd` |
 | vLLM wheel | `0.26.1rc1.dev457+gc810e5ee9.d20260808.precompiled` |
@@ -103,9 +105,10 @@ its fraction is naturally amortized as the prefix grows.
 
 ## Nsight Systems attribution
 
-The headline is the slower rank for each scope. `T` is the scope GPU wall span,
-`C` is the union of context and suffix-cache communication, `A` is the union of
-non-NCCL kernels, `O` is their overlap, and `E = C - O`.
+This first table is the initial capture at each prefix. The headline is the
+slower rank for each scope. `T` is the scope GPU wall span, `C` is the union of
+context and suffix-cache communication, `A` is the union of non-NCCL kernels,
+`O` is their overlap, and `E = C - O`.
 
 | Prefix | Scope | Rank | T (ms) | C (ms) | A (ms) | O (ms) | E (ms) | Exposed comm |
 | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -125,12 +128,43 @@ Relative to the ordinary means, those nsys-run CUDA events are
 gap is consistent with a fixed profiler/launch perturbation being amortized,
 but each point is only one independently captured sample.
 
+### Repeated 20K captures
+
+Three additional independent 20K captures tested whether the initial 32.38%
+headline was caused by an invalid or uniquely unlucky run. This table reports
+`self_attn`; the CUDA-event column is measured inside the same nsys run.
+
+| Capture | Slow rank | T (ms) | A (ms) | C (ms) | Context (ms) | Suffix (ms) | C / T | CUDA event (ms) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Initial | 1 | 8.202044 | 5.014857 | 2.655605 | 0.695581 | 1.960024 | 32.3774% | 8.352256 |
+| Rerun 1 | 0 | 8.124435 | 5.036972 | 2.310181 | 0.787650 | 1.522531 | 28.4350% | 8.321440 |
+| Rerun 2 | 1 | 8.130890 | 5.010406 | 2.322243 | 0.752481 | 1.569762 | 28.5607% | 8.343872 |
+| Rerun 3 | 0 | 7.539083 | 5.037510 | 1.862915 | 0.699201 | 1.163714 | 24.7101% | 7.713344 |
+
+Across all four captures, headline `C / T` has a 28.4979% median and a
+24.7101%-32.3774% range. `C` has a 2.316212 ms median, while `A` stays within
+5.010406-5.037510 ms. On the other rank, `C` stays within
+0.129569-0.131488 ms and `C / T` within 1.8212%-1.9327%. The slow rank sequence
+is 1, 0, 1, 0, so the imbalance follows process launch/progress phase rather
+than a consistently slower device or partition.
+
+The repeated result changes the confidence, not the mechanism. The initial
+32.38% is the high end of a reproducible critical-rank residency range rather
+than a bad 20K attention-compute sample. It still must not be interpreted as
+pure link-transfer cost: almost all of the cross-rank difference is time for
+which an NCCL kernel is resident while waiting for its peer. The four nsys-run
+CUDA events have an 8.332656 ms median, 29.17% above the 6.450741 ms ordinary
+mean, confirming that this short case is especially sensitive to profiler and
+launch synchronization. The complete aggregate is in
+[`prefix20k/nsys-reruns/summary.csv`](prefix20k/nsys-reruns/summary.csv).
+
 ### Why the communication ratios are not monotonic
 
-The per-rank decomposition exposes the source of the 20K headline outlier.
-`Context` and `suffix` are NCCL GPU-kernel residency, and bandwidth uses the
-physical context send volume. `C / T` equals the reported exposed-communication
-ratio because no same-rank non-NCCL kernel overlaps these collectives.
+The initial cross-prefix decomposition shows why these captures do not form a
+communication scaling law. `Context` and `suffix` are NCCL GPU-kernel
+residency, and bandwidth uses the physical context send volume. `C / T` equals
+the reported exposed-communication ratio because no same-rank non-NCCL kernel
+overlaps these collectives.
 
 | Prefix | Rank | Context (ms) | Suffix (ms) | Physical context GB/s | C / T |
 | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -143,13 +177,14 @@ ratio because no same-rank non-NCCL kernel overlaps these collectives.
 
 The suffix payload is exactly 147,456 bytes at every size. Its approximately
 13 microsecond residency on the short-residency rank is stable, while the
-other rank records 1.960, 0.434, and 0.898 ms. Those larger values cannot be
-caused by prefix volume. An NCCL kernel can remain resident while its rank
-waits for the peer process to launch or make progress, and nsys perturbs the
-two processes independently. The same effect lowers apparent context
-bandwidth on the headline rank. Which rank has the longer residency changes
-between captures, another indication of launch/progress skew rather than a
-backend- or length-dependent payload effect.
+initial slow rank records 1.960, 0.434, and 0.898 ms. In all four 20K captures,
+the slow-rank suffix residency is 1.164-1.960 ms and the peer remains near
+13 microseconds. Those larger values cannot be caused by prefix volume. An
+NCCL kernel can remain resident while its rank waits for the peer process to
+launch or make progress. Process scheduling and profiler perturbation also
+lower apparent context bandwidth on the critical rank. The longer residency
+alternates between ranks, another indication of launch/progress skew rather
+than a backend-, device-, or length-dependent payload effect.
 
 The timing trend is therefore reasonable, but the ratios require two distinct
 interpretations:
@@ -162,12 +197,12 @@ interpretations:
   and DCP context bytes both grow approximately as `O(L)`, so their ratio
   should approach a constant rather than double with prefix length. Extra
   chunks and sub-millisecond rank wait explain the small increase.
-- The 20K headline value of 32.38% is a valid description of that captured GPU
-  timeline, but not a representative transfer-cost proportion. The peer rank's
-  1.93% and the fixed-payload residency prove that the headline is dominated by
-  a one-sample synchronization wait. Repeated captures with cross-rank
-  critical-path analysis would be required for a stable causal communication
-  fraction.
+- The 20K critical-rank value is reproducibly high under this nsys setup:
+  24.71%-32.38% over four captures. The fixed suffix wait is divided by a much
+  shorter compute span, so it occupies a larger fraction than at 40K or 80K.
+  The peer's stable approximately 1.9% and the alternating slow rank show that
+  this is a synchronization-residency proportion, not a representative
+  payload-transfer or production causal fraction.
 
 ## Communication payloads
 
@@ -240,6 +275,9 @@ trace structure, and were successfully exported and reanalyzed by nsys.
 | Prefix | Sanitized report | SHA-256 |
 | ---: | --- | --- |
 | 20K | [`prefix20k_suffix256.sanitized.nsys-rep`](prefix20k/nsys/prefix20k_suffix256.sanitized.nsys-rep) | `e974d74db56d16636de84ed8dcf9575d998abaa0b75a5ded3e9d2a91d9f0367f` |
+| 20K rerun 1 | [`prefix20k_suffix256.sanitized.nsys-rep`](prefix20k/nsys-reruns/rerun-1/prefix20k_suffix256.sanitized.nsys-rep) | `05c23ca60c5bf1d8688cc641a9d34ce0f634da22a3ab2d074548252cbe9a10b6` |
+| 20K rerun 2 | [`prefix20k_suffix256.sanitized.nsys-rep`](prefix20k/nsys-reruns/rerun-2/prefix20k_suffix256.sanitized.nsys-rep) | `a17ec6ad881c28450f72abb3fbdc387936a91830e881347c432f24ee3a76f1ff` |
+| 20K rerun 3 | [`prefix20k_suffix256.sanitized.nsys-rep`](prefix20k/nsys-reruns/rerun-3/prefix20k_suffix256.sanitized.nsys-rep) | `a3e9d61a4f9659fa0b6cab0c5201296872f6a67d9457c522caa8198e47da94d9` |
 | 40K | [`prefix40k_suffix256.sanitized.nsys-rep`](prefix40k/nsys/prefix40k_suffix256.sanitized.nsys-rep) | `94b8add10047c8ae57945355b501416450e4070d8a39e79de4ede8bcb28bdabb` |
 | 80K | [`prefix80k_suffix256.sanitized.nsys-rep`](prefix80k/nsys/prefix80k_suffix256.sanitized.nsys-rep) | `a799a60e91d931ac61d1d7de3788c6108a2eea688d52dfaa5aeed6e760886bc9` |
 
@@ -275,6 +313,16 @@ for prefix_tokens in 20480 40960 81920; do
 done
 ```
 
+Repeat the attribution-sensitive 20K capture independently:
+
+```bash
+for repeat in 1 2 3; do
+  PREFIX_TOKENS=20480 MODE=nsys RUN_OVERVIEW=0 \
+    RUN_DIR="artifacts/pcp-dcp-flashmla-20k-rerun-${repeat}/nsys" \
+    benchmarks/experimental/pcp_dcp_mla_prefix/run_nsys.sh
+done
+```
+
 The driver defaults to `--attention-backend FLASHMLA` and verifies the worker
 implementation. Reanalyze any committed report with `analyze_nsys.py`, the
 matching `--unique-prefix-send-bytes`, and an installed nsys executable.
@@ -286,7 +334,8 @@ matching `--unique-prefix-send-bytes`, and an installed nsys executable.
 - Dummy BF16 weights and a deliberately dense layer 0 are not representative
   of an average DeepSeek-V3 MoE layer.
 - Three ordinary repetitions characterize short-run stability, not tails.
-- Each nsys point is a separate, profiler-perturbed one-sample capture.
+- Each nsys capture contains one profiled iteration; 20K has four independent
+  captures, while 40K and 80K each have one.
 - NCCL timeline exposure does not prove equivalent end-to-end causal delay.
 - The unsanitized reports cannot be committed safely on this node; manifests
   document every same-length credential redaction applied to the committed

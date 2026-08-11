@@ -1,0 +1,134 @@
+[
+  {
+    "backends": [
+      {
+        "kv_cache_dtype": "bfloat16",
+        "layer_name": "model.layers.0.self_attn.attn",
+        "outer_backend": "FLASHMLA",
+        "outer_impl": "FlashMLAImpl",
+        "prefill_backend": "FLASH_ATTN",
+        "prefill_backend_class": "FlashAttnPrefillBackend",
+        "use_pcp": true,
+        "use_sparse": false
+      }
+    ],
+    "cache": {
+      "block_size": 64,
+      "enable_prefix_caching": true,
+      "kv_cache_dtype": "bfloat16"
+    },
+    "compilation": {
+      "cudagraph_mode": "NONE",
+      "enforce_eager": true,
+      "mode": "0"
+    },
+    "decoder_layers": [
+      {
+        "attention_type": "DeepseekV2MLAAttention",
+        "layer_idx": 0,
+        "mlp_type": "DeepseekV2MLP"
+      }
+    ],
+    "device": 0,
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "gpu_name": "NVIDIA H100 80GB HBM3",
+    "load_format": "dummy",
+    "model_dtype": "torch.bfloat16",
+    "nccl_version": [
+      2,
+      29,
+      7
+    ],
+    "parallel": {
+      "cp_kv_cache_interleave_size": 1,
+      "dcp": 2,
+      "dcp_comm_backend": "ag_rs",
+      "pcp": 2,
+      "tp": 1
+    },
+    "parameter_dtypes": [
+      "torch.bfloat16"
+    ],
+    "quantization": null,
+    "rank": 0,
+    "scheduler": {
+      "max_model_len": 131072,
+      "max_num_batched_tokens": 8192,
+      "max_num_seqs": 1
+    },
+    "torch_cuda_version": "12.9",
+    "torch_version": "2.13.0+cu129",
+    "vllm_distribution_version": "0.26.1rc1.dev457+gc810e5ee9.d20260808.precompiled",
+    "vllm_version": "0.26.1rc1.dev457+gc810e5ee9.d20260808",
+    "world_size": 2
+  },
+  {
+    "backends": [
+      {
+        "kv_cache_dtype": "bfloat16",
+        "layer_name": "model.layers.0.self_attn.attn",
+        "outer_backend": "FLASHMLA",
+        "outer_impl": "FlashMLAImpl",
+        "prefill_backend": "FLASH_ATTN",
+        "prefill_backend_class": "FlashAttnPrefillBackend",
+        "use_pcp": true,
+        "use_sparse": false
+      }
+    ],
+    "cache": {
+      "block_size": 64,
+      "enable_prefix_caching": true,
+      "kv_cache_dtype": "bfloat16"
+    },
+    "compilation": {
+      "cudagraph_mode": "NONE",
+      "enforce_eager": true,
+      "mode": "0"
+    },
+    "decoder_layers": [
+      {
+        "attention_type": "DeepseekV2MLAAttention",
+        "layer_idx": 0,
+        "mlp_type": "DeepseekV2MLP"
+      }
+    ],
+    "device": 1,
+    "gpu_capability": [
+      9,
+      0
+    ],
+    "gpu_name": "NVIDIA H100 80GB HBM3",
+    "load_format": "dummy",
+    "model_dtype": "torch.bfloat16",
+    "nccl_version": [
+      2,
+      29,
+      7
+    ],
+    "parallel": {
+      "cp_kv_cache_interleave_size": 1,
+      "dcp": 2,
+      "dcp_comm_backend": "ag_rs",
+      "pcp": 2,
+      "tp": 1
+    },
+    "parameter_dtypes": [
+      "torch.bfloat16"
+    ],
+    "quantization": null,
+    "rank": 1,
+    "scheduler": {
+      "max_model_len": 131072,
+      "max_num_batched_tokens": 8192,
+      "max_num_seqs": 1
+    },
+    "torch_cuda_version": "12.9",
+    "torch_version": "2.13.0+cu129",
+    "vllm_distribution_version": "0.26.1rc1.dev457+gc810e5ee9.d20260808.precompiled",
+    "vllm_version": "0.26.1rc1.dev457+gc810e5ee9.d20260808",
+    "world_size": 2
+  }
+]
