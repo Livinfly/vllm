@@ -62,13 +62,8 @@ logger = init_logger(__name__)
 # batch mode (#1).
 MIN_HEADS_FOR_BF16_PREFILL = 32
 
-# Max tokens the FP8 sparse decode kernel (flash_mla_cuda.sparse_decode_fwd)
-# processes per call in mixed-batch mode.
-# ref. https://github.com/vllm-project/FlashMLA/blob/a8f794d1251cbfd88a5011445dd5582289c727e4/csrc/api/sparse_decode.h#L463-L466
-MAX_SCRATCH_CHUNK_TOKENS = max(
-    1,
-    (envs.VLLM_FLASHMLA_SPARSE_MAX_SCRATCH_MB * 1024 * 1024) // (2 * 64 * 512 * 4),
-)
+FP8_MIXED_BATCH_VALUE_HEAD_DIM = 512
+FP8_MIXED_BATCH_ACCUM_ELEMENT_SIZE = 4
 
 """
 NOTE: FlashMLA Sparse uses an fp8 cache with the following format
@@ -244,10 +239,51 @@ def get_prefill_workspace_size(max_model_len: int):
     return max_model_len * 5
 
 
-def fp8_mixed_batch_chunk_slices(num_tokens: int) -> list[slice]:
+def fp8_mixed_batch_scratch_bytes(
+    num_tokens: int,
+    padded_heads: int,
+    num_sms: int,
+    is_sm100: bool,
+) -> int:
+    """Return the dominant ``o_accum`` allocation for one mixed-FP8 call."""
+    assert num_tokens > 0
+    sm_part_head_divisor = 1 if is_sm100 else max(1, padded_heads // 64)
+    num_sm_parts = max(num_sms // num_tokens // sm_part_head_divisor, 1)
+    return (
+        (1 + num_sm_parts)
+        * num_tokens
+        * padded_heads
+        * FP8_MIXED_BATCH_VALUE_HEAD_DIM
+        * FP8_MIXED_BATCH_ACCUM_ELEMENT_SIZE
+    )
+
+
+def fp8_mixed_batch_max_chunk_tokens(
+    padded_heads: int,
+    num_sms: int,
+    is_sm100: bool,
+    max_scratch_bytes: int,
+) -> int:
+    bytes_per_token_with_one_sm_part = (
+        2
+        * padded_heads
+        * FP8_MIXED_BATCH_VALUE_HEAD_DIM
+        * FP8_MIXED_BATCH_ACCUM_ELEMENT_SIZE
+    )
+    max_tokens = max(1, max_scratch_bytes // bytes_per_token_with_one_sm_part)
+    while (
+        max_tokens > 1
+        and fp8_mixed_batch_scratch_bytes(max_tokens, padded_heads, num_sms, is_sm100)
+        > max_scratch_bytes
+    ):
+        max_tokens -= 1
+    return max_tokens
+
+
+def fp8_mixed_batch_chunk_slices(num_tokens: int, max_chunk_tokens: int) -> list[slice]:
     return [
-        slice(start, min(start + MAX_SCRATCH_CHUNK_TOKENS, num_tokens))
-        for start in range(0, num_tokens, MAX_SCRATCH_CHUNK_TOKENS)
+        slice(start, min(start + max_chunk_tokens, num_tokens))
+        for start in range(0, num_tokens, max_chunk_tokens)
     ]
 
 
@@ -337,6 +373,12 @@ class FlashMLASparseMetadataBuilder(
             dtype=torch.int32,
             device=device,
         )
+        self.fp8_mixed_batch_chunk_tokens = fp8_mixed_batch_max_chunk_tokens(
+            self.fp8_decode_padded_heads,
+            sm_count,
+            current_platform.is_device_capability_family(100),
+            envs.VLLM_FLASHMLA_SPARSE_MAX_SCRATCH_MB * 1024 * 1024,
+        )
 
         self.fp8_use_mixed_batch = self.num_heads < MIN_HEADS_FOR_BF16_PREFILL
 
@@ -397,9 +439,11 @@ class FlashMLASparseMetadataBuilder(
         # Use padded head count since that's what the kernel will see
         padded_heads = self.fp8_decode_padded_heads
 
-        # Build metadata for all tokens as a single batch
+        # Each subchunk is presented to the kernel as a single batch.
         chunks = []
-        for token_slice in fp8_mixed_batch_chunk_slices(num_tokens):
+        for token_slice in fp8_mixed_batch_chunk_slices(
+            num_tokens, self.fp8_mixed_batch_chunk_tokens
+        ):
             chunk_num_tokens = token_slice.stop - token_slice.start
             scheduler_metadata, _ = get_mla_metadata(
                 cache_seqlens=self.topk_tokens_tensor[:1],  # Single batch
@@ -848,10 +892,15 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
 
         assert attn_metadata.fp8_extra_metadata is not None
         assert isinstance(attn_metadata.fp8_extra_metadata, list)
-        attn_out = q.new_empty((*q.shape[:-1], 512))
+        attn_out = q.new_empty((*q.shape[:-1], self.kv_lora_rank))
+        lse = (
+            torch.empty(q.shape[:2], dtype=torch.float32, device=q.device)
+            if self.need_to_return_lse_for_decode
+            else None
+        )
 
         for token_slice, fp8_metadata in attn_metadata.fp8_extra_metadata:
-            _attn_out, _ = self._fp8_flash_mla_kernel(
+            _attn_out, _lse = self._fp8_flash_mla_kernel(
                 # unsqueeze to add batch_dim: (T_i, H, D) -> (1, T_i, H, D)
                 q=q[token_slice].unsqueeze(0),
                 kv_c_and_k_pe_cache=kv_c_and_k_pe_cache,
@@ -862,8 +911,16 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
 
             # Output is (1, T_i, H, D_v), squeeze back to (T_i, H, D_v)
             attn_out[token_slice] = _attn_out.squeeze(0)
+            if lse is not None:
+                lse[token_slice] = _lse.squeeze(0).transpose(0, 1)
 
-        return attn_out
+        if lse is None:
+            return attn_out, None
+
+        empty_rows = (topk_indices == -1).all(dim=-1)
+        attn_out.masked_fill_(empty_rows.view(-1, 1, 1), 0.0)
+        lse.masked_fill_(empty_rows.view(-1, 1), float("-inf"))
+        return attn_out, lse
 
     def _fp8_flash_mla_kernel(
         self,

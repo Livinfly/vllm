@@ -43,6 +43,9 @@ from vllm.v1.attention.backends.mla.flashmla_sparse import (
     FlashMLASparseImpl,
     FlashMLASparseMetadata,
     FlashMLASparseMetadataBuilder,
+    fp8_mixed_batch_chunk_slices,
+    fp8_mixed_batch_max_chunk_tokens,
+    fp8_mixed_batch_scratch_bytes,
     triton_convert_req_index_to_global_index,
 )
 from vllm.v1.attention.backends.mla.indexer import split_indexer_prefill_chunks
@@ -1546,6 +1549,41 @@ def test_fp8_dcp_head_envelope_guard(local_heads, dcp_world_size, should_raise):
         assert local_pad == gathered_pad
 
 
+@pytest.mark.parametrize(("padded_heads", "expected_tokens"), [(64, 2048), (128, 1024)])
+def test_fp8_mixed_batch_chunk_bound_accounts_for_padded_heads(
+    padded_heads, expected_tokens
+):
+    max_scratch_bytes = 512 * 1024 * 1024
+    max_chunk_tokens = fp8_mixed_batch_max_chunk_tokens(
+        padded_heads=padded_heads,
+        num_sms=132,
+        is_sm100=False,
+        max_scratch_bytes=max_scratch_bytes,
+    )
+
+    assert max_chunk_tokens == expected_tokens
+    assert (
+        fp8_mixed_batch_scratch_bytes(
+            max_chunk_tokens, padded_heads, num_sms=132, is_sm100=False
+        )
+        <= max_scratch_bytes
+    )
+    assert (
+        fp8_mixed_batch_scratch_bytes(
+            max_chunk_tokens + 1, padded_heads, num_sms=132, is_sm100=False
+        )
+        > max_scratch_bytes
+    )
+
+
+def test_fp8_mixed_batch_chunk_slices_cover_all_tokens():
+    assert fp8_mixed_batch_chunk_slices(5, 2) == [
+        slice(0, 2),
+        slice(2, 4),
+        slice(4, 5),
+    ]
+
+
 def test_fp8_mixed_batch_dcp_neutralizes_empty_rows(monkeypatch):
     """A decode row whose top-k shard holds no local candidates (all -1) has
     undefined kernel out/lse; it must come back as (0, -inf), the identity of
@@ -1566,21 +1604,27 @@ def test_fp8_mixed_batch_dcp_neutralizes_empty_rows(monkeypatch):
     )
 
     def run_kernel(**kwargs):
+        chunk_indices = kwargs["topk_indices"].squeeze(0)
+        chunk_tokens = chunk_indices.shape[0]
         out = torch.full(
-            (1, num_tokens, num_heads, 1), float("nan"), device=DEVICE_TYPE
+            (1, chunk_tokens, num_heads, 1), float("nan"), device=DEVICE_TYPE
         )
-        lse = torch.full((1, num_heads, num_tokens), float("nan"), device=DEVICE_TYPE)
-        for token_id in (0, 2):  # rows with local candidates get real values
-            out[0, token_id] = float(token_id + 1)
-            lse[0, :, token_id] = float(token_id + 1)
+        lse = torch.full((1, num_heads, chunk_tokens), float("nan"), device=DEVICE_TYPE)
+        for token_id, row in enumerate(chunk_indices):
+            valid = row[row >= 0]
+            if valid.numel() > 0:
+                value = float(valid[0].item() + 1)
+                out[0, token_id] = value
+                lse[0, :, token_id] = value
         return out, lse
 
+    fp8_metadata = FlashMLASparseMetadata.FP8KernelMetadata(
+        scheduler_metadata=object(),  # type: ignore[arg-type]
+        dummy_block_table=torch.empty(1, 1, dtype=torch.int32, device=DEVICE_TYPE),
+        cache_lens=torch.empty(1, dtype=torch.int32, device=DEVICE_TYPE),
+    )
     metadata = SimpleNamespace(
-        fp8_extra_metadata=FlashMLASparseMetadata.FP8KernelMetadata(
-            scheduler_metadata=object(),  # type: ignore[arg-type]
-            dummy_block_table=torch.empty(1, 1, dtype=torch.int32, device=DEVICE_TYPE),
-            cache_lens=torch.empty(1, dtype=torch.int32, device=DEVICE_TYPE),
-        ),
+        fp8_extra_metadata=[(slice(0, 2), fp8_metadata), (slice(2, 3), fp8_metadata)],
         req_id_per_token=torch.empty(num_tokens, dtype=torch.int32, device=DEVICE_TYPE),
         block_table=torch.empty(1, 1, dtype=torch.int32, device=DEVICE_TYPE),
         block_size=64,
@@ -1589,6 +1633,7 @@ def test_fp8_mixed_batch_dcp_neutralizes_empty_rows(monkeypatch):
     impl = SimpleNamespace(
         dcp_world_size=2,
         dcp_rank=0,
+        kv_lora_rank=1,
         need_to_return_lse_for_decode=True,
         _fp8_flash_mla_kernel=run_kernel,
     )
