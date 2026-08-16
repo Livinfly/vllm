@@ -48,7 +48,9 @@ from vllm.v1.attention.backends.mla.flashmla_sparse import (
     FlashMLASparseImpl,
     FlashMLASparseMetadata,
     FlashMLASparseMetadataBuilder,
+    map_materialized_dcp_topk,
     triton_convert_req_index_to_global_index,
+    upconvert_fp8_ds_mla_workspace,
 )
 from vllm.v1.attention.backends.mla.indexer import split_indexer_prefill_chunks
 from vllm.v1.attention.backends.utils import (
@@ -1363,6 +1365,112 @@ def test_flashmla_fp8_metadata_reuses_common_batch_split():
     assert fp8_metadata.num_prefill_tokens == 1
 
 
+def test_flashmla_materialize_metadata_uses_owner_packed_layout():
+    builder = SimpleNamespace(
+        device=torch.device(DEVICE_TYPE),
+        vllm_config=SimpleNamespace(model_config=SimpleNamespace(max_model_len=16)),
+        pcp_dcp=True,
+        pcp_prefill_mode="kv_materialize",
+        dcp_world_size=2,
+        dcp_rank=0,
+        cp_kv_cache_interleave_size=1,
+    )
+    common_metadata = SimpleNamespace(
+        num_actual_tokens=3,
+        seq_lens_cpu_upper_bound=torch.tensor([5, 4]),
+        query_start_loc_cpu=torch.tensor([0, 2, 3]),
+        block_table_tensor=torch.zeros(2, 1, dtype=torch.int32, device=DEVICE_TYPE),
+    )
+    metadata = FlashMLASparseMetadata(
+        num_reqs=2,
+        max_query_len=2,
+        max_seq_len=5,
+        num_actual_tokens=3,
+        query_start_loc=torch.tensor([0, 2, 3], device=DEVICE_TYPE),
+        slot_mapping=torch.arange(3, device=DEVICE_TYPE),
+        block_table=common_metadata.block_table_tensor,
+        req_id_per_token=torch.tensor([0, 0, 1], dtype=torch.int32, device=DEVICE_TYPE),
+        num_decodes=0,
+        num_prefills=2,
+        num_decode_tokens=0,
+    )
+
+    fp8_metadata = FlashMLASparseMetadataBuilder._build_fp8_separate_prefill_decode(
+        builder, common_metadata, metadata
+    )
+
+    assert fp8_metadata.prefill is not None
+    assert len(fp8_metadata.prefill.chunks) == 1
+    chunk = fp8_metadata.prefill.chunks[0]
+    assert chunk.dcp_owner_stride == 5
+    assert chunk.local_total_seq_len == 5
+    torch.testing.assert_close(
+        chunk.local_cu_seq_lens,
+        torch.tensor([0, 3, 5], dtype=torch.int32, device=DEVICE_TYPE),
+    )
+    torch.testing.assert_close(
+        chunk.dcp_workspace_starts,
+        torch.tensor([[0, 0], [3, 2]], dtype=torch.int32, device=DEVICE_TYPE),
+    )
+
+
+def test_flashmla_materialized_topk_maps_rank_major_owner_rows():
+    topk = torch.tensor(
+        [[0, 1, 2, 3, 4, -1], [0, 1, 2, 3, -1, -1]],
+        dtype=torch.int32,
+        device=DEVICE_TYPE,
+    )
+    request_ids = torch.tensor([2, 3], dtype=torch.int32, device=DEVICE_TYPE)
+    starts = torch.tensor([[0, 0], [3, 2]], dtype=torch.int32, device=DEVICE_TYPE)
+
+    mapped, lengths = map_materialized_dcp_topk(
+        topk,
+        request_ids,
+        starts,
+        owner_stride=5,
+        dcp_world_size=2,
+        cp_kv_cache_interleave_size=1,
+        request_offset=2,
+    )
+
+    torch.testing.assert_close(
+        mapped,
+        torch.tensor(
+            [[0, 5, 1, 6, 2, -1], [3, 7, 4, 8, -1, -1]],
+            dtype=torch.int32,
+            device=DEVICE_TYPE,
+        ),
+    )
+    torch.testing.assert_close(
+        lengths, torch.tensor([5, 4], dtype=torch.int32, device=DEVICE_TYPE)
+    )
+
+
+def test_flashmla_materialized_fp8_upconvert_matches_paged_cache_op():
+    num_tokens = 3
+    packed = torch.empty(num_tokens, 656, dtype=torch.uint8, device=DEVICE_TYPE)
+    nope = torch.randn(512 * num_tokens, device=DEVICE_TYPE).to(torch.float8_e4m3fn)
+    scales = torch.rand(num_tokens, 4, dtype=torch.float32, device=DEVICE_TYPE)
+    rope = torch.randn(num_tokens, 64, dtype=torch.bfloat16, device=DEVICE_TYPE)
+    packed[:, :512] = nope.view(num_tokens, 512).view(torch.uint8)
+    packed[:, 512:528] = scales.view(torch.uint8).view(num_tokens, 16)
+    packed[:, 528:] = rope.view(torch.uint8).view(num_tokens, 128)
+
+    expected = torch.empty(num_tokens, 576, dtype=torch.bfloat16, device=DEVICE_TYPE)
+    ops.cp_gather_and_upconvert_fp8_kv_cache(
+        packed.unsqueeze(0),
+        expected,
+        torch.zeros(1, 1, dtype=torch.int32, device=DEVICE_TYPE),
+        torch.zeros(1, dtype=torch.int32, device=DEVICE_TYPE),
+        1,
+    )
+    actual = torch.empty_like(expected)
+
+    upconvert_fp8_ds_mla_workspace(packed, actual)
+
+    torch.testing.assert_close(actual, expected, rtol=1e-2, atol=1e-3)
+
+
 def test_flashmla_common_metadata_requires_uniform_decodes():
     common_metadata = SimpleNamespace(
         max_query_len=3,
@@ -1492,6 +1600,8 @@ def test_flashmla_fp8_paths_accept_decode_subset(monkeypatch, use_mixed_batch: b
         topk_indices_buffer=topk_indices,
         num_heads=2,
         kv_lora_rank=1,
+        dcp_world_size=1,
+        need_to_return_lse_for_decode=False,
         _fp8_flash_mla_kernel=run_kernel,
     )
     impl._forward_fp8_kv_mixed_batch = MethodType(
@@ -1512,3 +1622,82 @@ def test_flashmla_fp8_paths_accept_decode_subset(monkeypatch, use_mixed_batch: b
     assert kernel_q_shapes == [(1, num_decode_tokens, 2, 3)]
     assert output.shape == (num_decode_tokens, 2, 1)
     assert lse is None
+
+
+def test_flashmla_fp8_dcp_neutralizes_empty_shards(monkeypatch):
+    """An empty DCP KV shard must be the identity of the LSE merge."""
+    num_tokens, num_heads, head_dim = 3, 2, 3
+    q = torch.empty(num_tokens, num_heads, head_dim, device=DEVICE_TYPE)
+    local_indices = torch.tensor(
+        [[0, 1, -1, -1], [-1, -1, -1, -1], [2, -1, 3, -1]],
+        dtype=torch.int32,
+        device=DEVICE_TYPE,
+    )
+    monkeypatch.setattr(
+        "vllm.v1.attention.backends.mla.flashmla_sparse."
+        "triton_filter_and_convert_dcp_index",
+        lambda *args, **kwargs: local_indices,
+    )
+
+    def run_kernel(**kwargs):
+        out = torch.full(
+            (1, num_tokens, num_heads, 1),
+            float("nan"),
+            device=DEVICE_TYPE,
+        )
+        lse = torch.full(
+            (1, num_heads, num_tokens),
+            float("nan"),
+            device=DEVICE_TYPE,
+        )
+        for token_id in (0, 2):
+            out[0, token_id] = float(token_id + 1)
+            lse[0, :, token_id] = float(token_id + 1)
+        return out, lse
+
+    metadata = SimpleNamespace(
+        fp8_extra_metadata=FlashMLASparseMetadata.FP8KernelMetadata(
+            scheduler_metadata=object(),  # type: ignore[arg-type]
+            dummy_block_table=torch.empty(1, 1, dtype=torch.int32, device=DEVICE_TYPE),
+            cache_lens=torch.empty(1, dtype=torch.int32, device=DEVICE_TYPE),
+        ),
+        req_id_per_token=torch.empty(num_tokens, dtype=torch.int32, device=DEVICE_TYPE),
+        block_table=torch.empty(1, 1, dtype=torch.int32, device=DEVICE_TYPE),
+        block_size=64,
+        cp_kv_cache_interleave_size=1,
+    )
+    impl = SimpleNamespace(
+        dcp_world_size=2,
+        dcp_rank=0,
+        need_to_return_lse_for_decode=True,
+        _fp8_flash_mla_kernel=run_kernel,
+    )
+
+    out, lse = FlashMLASparseImpl._forward_fp8_kv_mixed_batch(
+        impl,
+        q,
+        torch.empty(0, device=DEVICE_TYPE),
+        local_indices,
+        metadata,
+    )
+
+    assert lse is not None
+    assert torch.equal(out[1], torch.zeros_like(out[1]))
+    assert torch.isneginf(lse[1]).all()
+    assert out.is_contiguous()
+    assert not out.isnan().any()
+    assert not lse.isnan().any()
+
+
+def test_flashmla_pcp_dcp_rejects_missing_global_request_metadata():
+    impl = SimpleNamespace(dcp_world_size=2, pcp_world_size=2)
+    metadata = SimpleNamespace(num_prefills=1, pcp_query_routing=None)
+
+    with pytest.raises(RuntimeError, match="requires global request metadata"):
+        FlashMLASparseImpl.forward_mqa(
+            impl,
+            torch.empty(0, device=DEVICE_TYPE),
+            torch.empty(0, device=DEVICE_TYPE),
+            metadata,
+            SimpleNamespace(),
+        )

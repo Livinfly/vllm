@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -8,6 +9,8 @@ import torch
 from vllm.config import CUDAGraphMode, VllmConfig
 from vllm.distributed.parallel_state import get_dcp_group, get_pcp_group
 from vllm.logger import init_logger
+from vllm.platforms import current_platform
+from vllm.v1.attention.backend import PCPQueryRoutingMetadata
 from vllm.v1.attention.backends.utils import PAD_SLOT_ID
 from vllm.v1.worker.gpu.block_table import BlockTables
 from vllm.v1.worker.gpu.buffer_utils import async_copy_to_gpu
@@ -19,6 +22,10 @@ from vllm.v1.worker.gpu.input_batch import (
     prepare_pos_seq_lens,
 )
 from vllm.v1.worker.gpu.states import RequestState
+
+if TYPE_CHECKING:
+    from vllm.v1.kv_cache_interface import KVCacheConfig
+    from vllm.v1.worker.utils import AttentionGroup
 
 logger = init_logger(__name__)
 
@@ -69,6 +76,7 @@ class PCPManager:
         self._hidden_restore_idx: torch.Tensor | None = None
         self._padded_gather_idx: torch.Tensor | None = None
         self._gathered_kv_write_mask: torch.Tensor | None = None
+        self._query_routing: PCPQueryRoutingMetadata | None = None
         self._pad_slot_id = torch.tensor(PAD_SLOT_ID, dtype=torch.int64, device=device)
 
         max_num_local_reqs = 2 * max_num_reqs if max_num_reqs is not None else None
@@ -149,6 +157,70 @@ class PCPManager:
                 "MRV2 PCP does not support speculative decoding yet."
             )
         is_sparse_mla = hasattr(model_config.hf_text_config, "index_topk")
+        dcp_size = parallel_config.decode_context_parallel_size
+        if is_sparse_mla and dcp_size > 1:
+            backend = vllm_config.attention_config.backend
+            backend_name = backend.name if backend is not None else None
+            if backend_name != "FLASHMLA_SPARSE":
+                raise NotImplementedError(
+                    "Sparse MLA PCP+DCP requires --attention-backend "
+                    "FLASHMLA_SPARSE; automatic or alternate backend routing is "
+                    "not supported."
+                )
+            if (
+                parallel_config.tensor_parallel_size != 1
+                or parallel_config.pipeline_parallel_size != 1
+                or parallel_config.data_parallel_size != 1
+                or pcp_size != 2
+                or dcp_size != 2
+            ):
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP currently requires TP=PP=DP=1 and "
+                    f"PCP=DCP=2; got TP={parallel_config.tensor_parallel_size}, "
+                    f"PP={parallel_config.pipeline_parallel_size}, "
+                    f"DP={parallel_config.data_parallel_size}, PCP={pcp_size}, "
+                    f"DCP={dcp_size}."
+                )
+            if parallel_config.dcp_comm_backend != "ag_rs":
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP currently requires "
+                    "dcp_comm_backend='ag_rs'."
+                )
+            if parallel_config.use_ubatching:
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP does not support ubatching yet."
+                )
+            if parallel_config.cp_kv_cache_interleave_size != 1:
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP currently requires "
+                    "cp_kv_cache_interleave_size=1."
+                )
+            if vllm_config.cache_config.block_size != 64:
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP currently requires block_size=64."
+                )
+            if vllm_config.cache_config.cache_dtype != "fp8_ds_mla":
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP currently requires "
+                    "kv_cache_dtype=fp8_ds_mla."
+                )
+            if model_config.hf_text_config.model_type != "deepseek_v32":
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP is currently limited to DeepSeek V3.2."
+                )
+            if not vllm_config.cache_config.enable_prefix_caching:
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP currently requires prefix caching."
+                )
+            if not model_config.enforce_eager:
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP currently requires --enforce-eager."
+                )
+            if not current_platform.is_device_capability_family(90):
+                raise NotImplementedError(
+                    "FLASHMLA_SPARSE PCP+DCP is currently qualified only on "
+                    "Hopper (SM90); Blackwell requires separate qualification."
+                )
         if (
             is_sparse_mla
             and vllm_config.compilation_config.cudagraph_mode != CUDAGraphMode.NONE
@@ -414,6 +486,14 @@ class PCPManager:
         local_gather_idx = self._padded_gather_idx[
             rank_token_start : rank_token_start + num_local_tokens_padded
         ]
+        assert self._hidden_restore_idx is not None
+        self._query_routing = PCPQueryRoutingMetadata(
+            global_from_gathered=self._hidden_restore_idx,
+            local_from_global=local_gather_idx[:num_local_tokens],
+            local_num_tokens=num_local_tokens,
+            local_num_tokens_padded=num_local_tokens_padded,
+            gathered_from_global=self._padded_gather_idx,
+        )
         torch.index_select(
             global_batch.input_ids,
             0,
@@ -556,6 +636,83 @@ class PCPManager:
         )
         slot_mappings = self.prepare_slot_mappings()
         return block_tables, slot_mappings
+
+    def build_query_routed_attn_metadata(
+        self,
+        local_attn_metadata: dict[str, Any],
+        attn_groups: list[list["AttentionGroup"]],
+        kv_cache_config: "KVCacheConfig",
+    ) -> dict[str, Any]:
+        """Build sparse metadata in global request order for PCP+DCP."""
+        if self.dcp_world_size <= 1:
+            return {}
+
+        if self.pcp_world_size != self.dcp_world_size or self.pcp_rank != self.dcp_rank:
+            raise RuntimeError(
+                "PCP query routing requires identical PCP and DCP rank ordering."
+            )
+
+        assert self._global_batch is not None
+        assert self._query_routing is not None
+        assert self._block_tables is not None
+        assert self._global_batch_slot_mappings is not None
+
+        is_prefilling = self._global_batch.is_prefilling_np[
+            : self._global_batch.num_reqs
+        ]
+        if not is_prefilling.any():
+            return {}
+        if not is_prefilling.all():
+            raise RuntimeError(
+                "Sparse MLA PCP+DCP does not support mixed prefill/decode batches."
+            )
+
+        routed_groups = [
+            [group for group in groups if group.backend.requires_pcp_query_routing()]
+            for groups in attn_groups
+        ]
+        if not any(routed_groups):
+            return {}
+
+        from vllm.v1.worker.gpu.attn_utils import build_attn_metadata
+
+        global_batch = self._global_batch
+        global_block_tables = self._block_tables.gather_block_tables(
+            global_batch.idx_mapping,
+            global_batch.num_reqs,
+        )
+        global_slot_mappings = self._global_batch_slot_mappings[
+            :, : global_batch.num_tokens
+        ]
+        routed = build_attn_metadata(
+            attn_groups=routed_groups,
+            num_reqs=global_batch.num_reqs,
+            num_tokens=global_batch.num_tokens,
+            query_start_loc_gpu=global_batch.query_start_loc,
+            query_start_loc_cpu=torch.from_numpy(global_batch.query_start_loc_np),
+            max_query_len=int(global_batch.num_scheduled_tokens.max()),
+            seq_lens=global_batch.seq_lens,
+            max_seq_len=int(global_batch.seq_lens_cpu_upper_bound.max().item()),
+            block_tables=global_block_tables,
+            slot_mappings=global_slot_mappings,
+            kv_cache_config=kv_cache_config,
+            seq_lens_cpu_upper_bound=global_batch.seq_lens_cpu_upper_bound,
+            dcp_local_seq_lens=global_batch.dcp_local_seq_lens,
+            positions=global_batch.positions,
+            is_prefilling=torch.from_numpy(global_batch.is_prefilling_np),
+        )
+
+        for groups in routed_groups:
+            for group in groups:
+                metadata = routed[group.layer_names[0]]
+                metadata.pcp_query_routing = self._query_routing
+                if group.backend.get_name() in (
+                    "DEEPSEEK_V32_INDEXER",
+                    "DEEPSEEK_V4_INDEXER",
+                ):
+                    local_metadata = local_attn_metadata[group.layer_names[0]]
+                    metadata.pcp_cache_slot_mapping = local_metadata.slot_mapping
+        return routed
 
     def prepare_slot_mappings(self) -> torch.Tensor:
         assert self._block_tables is not None

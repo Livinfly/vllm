@@ -98,7 +98,12 @@ def _assert_q_gather_matches_reference(
     assert remaining_storage_bytes >= required_storage_bytes
 
 
-def _distributed_run(fn, world_size: int, extra_env: dict[str, str]) -> None:
+def _distributed_run(
+    fn,
+    world_size: int,
+    extra_env: dict[str, str],
+    timeout: int = 120,
+) -> None:
     port = str(get_open_port())
     processes: list[mp.Process] = []
     for rank in range(world_size):
@@ -116,7 +121,7 @@ def _distributed_run(fn, world_size: int, extra_env: dict[str, str]) -> None:
         process.start()
 
     for process in processes:
-        process.join(timeout=120)
+        process.join(timeout=timeout)
 
     for process in processes:
         if process.is_alive():
@@ -482,7 +487,205 @@ def test_mla_dcp_manager_selects_pcp_combine(monkeypatch):
 
     assert isinstance(manager.combine, functools.partial)
     assert manager.combine.func is dcp_manager.cp_lse_ag_out_ar
+    assert isinstance(manager.pcp_combine, functools.partial)
+    assert manager.pcp_combine.func is dcp_manager.cp_lse_ag_out_pcp_rs
     assert manager.query_gather is None
+
+
+@pytest.mark.parametrize(
+    ("rank", "local_rows"),
+    [(0, [0, 1, 6]), (1, [2, 3, 4, 5])],
+)
+def test_pcp_query_gather_restores_global_row_order(monkeypatch, rank, local_rows):
+    from vllm.model_executor.layers.attention import pcp
+    from vllm.v1.attention.backend import PCPQueryRoutingMetadata
+
+    rank_rows = (
+        torch.tensor([[0], [1], [6], [0]]),
+        torch.tensor([[2], [3], [4], [5]]),
+    )
+
+    class FakeGroup:
+        def all_gather(self, tensor: torch.Tensor, dim: int) -> torch.Tensor:
+            assert dim == 0
+            torch.testing.assert_close(tensor, rank_rows[rank])
+            return torch.cat(rank_rows, dim=0)
+
+    monkeypatch.setattr(pcp, "get_pcp_group", FakeGroup)
+    routing = PCPQueryRoutingMetadata(
+        global_from_gathered=torch.tensor([0, 1, 4, 5, 6, 7, 2]),
+        local_from_global=torch.tensor(local_rows),
+        local_num_tokens=len(local_rows),
+        local_num_tokens_padded=4,
+    )
+
+    gathered = pcp.gather_pcp_query_rows(torch.tensor(local_rows).view(-1, 1), routing)
+
+    torch.testing.assert_close(gathered.flatten(), torch.arange(7))
+
+
+def test_pcp_local_rows_follow_global_chunk_ranges():
+    from vllm.model_executor.layers.attention.pcp import (
+        get_pcp_local_rows_for_range,
+    )
+    from vllm.v1.attention.backend import PCPQueryRoutingMetadata
+
+    routing = PCPQueryRoutingMetadata(
+        global_from_gathered=torch.tensor([0, 1, 4, 5, 6, 7, 2]),
+        local_from_global=torch.tensor([0, 1, 6]),
+        local_num_tokens=3,
+        local_num_tokens_padded=4,
+    )
+
+    local_rows, chunk_rows = get_pcp_local_rows_for_range(routing, 0, 4)
+    torch.testing.assert_close(local_rows, torch.tensor([0, 1]))
+    torch.testing.assert_close(chunk_rows, torch.tensor([0, 1]))
+
+    local_rows, chunk_rows = get_pcp_local_rows_for_range(routing, 4, 7)
+    torch.testing.assert_close(local_rows, torch.tensor([2]))
+    torch.testing.assert_close(chunk_rows, torch.tensor([2]))
+
+
+@pytest.mark.parametrize(
+    ("rank", "local_tokens", "expected"),
+    [(0, 3, [0, 1, 6]), (1, 4, [2, 3, 4, 5])],
+)
+def test_pcp_combine_reduce_scatters_token_rows(
+    monkeypatch,
+    rank: int,
+    local_tokens: int,
+    expected: list[int],
+):
+    from vllm.v1.attention.backend import PCPQueryRoutingMetadata
+    from vllm.v1.attention.ops import common
+
+    monkeypatch.setattr(
+        common,
+        "_cp_lse_common",
+        lambda output, lse, *args, **kwargs: (output, lse),
+    )
+
+    class FakeGroup:
+        world_size = 2
+
+        def reduce_scatter(self, tensor: torch.Tensor, dim: int) -> torch.Tensor:
+            assert dim == 0
+            torch.testing.assert_close(
+                tensor.flatten(), torch.tensor([0, 1, 6, 0, 2, 3, 4, 5])
+            )
+            return tensor.chunk(self.world_size, dim=dim)[rank]
+
+    routing = PCPQueryRoutingMetadata(
+        global_from_gathered=torch.tensor([0, 1, 4, 5, 6, 7, 2]),
+        local_from_global=torch.tensor(expected),
+        local_num_tokens=local_tokens,
+        local_num_tokens_padded=4,
+        gathered_from_global=torch.tensor([0, 1, 6, 0, 2, 3, 4, 5]),
+    )
+    output = torch.arange(7).view(7, 1, 1)
+    lse = torch.zeros(7, 1)
+
+    local = common.cp_lse_ag_out_pcp_rs(output, lse, routing, FakeGroup())
+
+    torch.testing.assert_close(local.flatten(), torch.tensor(expected))
+
+
+def _distributed_pcp_combine_worker(env: dict[str, str]) -> None:
+    update_environment_variables(env)
+    local_rank = int(env["LOCAL_RANK"])
+    device = torch.device(f"cuda:{local_rank}")
+    torch.accelerator.set_device_index(local_rank)
+    dist.init_process_group(backend="nccl")
+    try:
+        from vllm.v1.attention.backend import PCPQueryRoutingMetadata
+        from vllm.v1.attention.ops.common import cp_lse_ag_out_pcp_rs
+
+        class NCCLGroup:
+            world_size = dist.get_world_size()
+            rank_in_group = dist.get_rank()
+
+            def all_gather(self, tensor: torch.Tensor, dim: int) -> torch.Tensor:
+                assert dim == 0
+                gathered = tensor.new_empty(
+                    (self.world_size * tensor.shape[0], *tensor.shape[1:])
+                )
+                dist.all_gather_into_tensor(gathered, tensor.contiguous())
+                return gathered
+
+            def reduce_scatter(self, tensor: torch.Tensor, dim: int) -> torch.Tensor:
+                assert dim == 0
+                local = tensor.new_empty(
+                    (tensor.shape[0] // self.world_size, *tensor.shape[1:])
+                )
+                dist.reduce_scatter_tensor(local, tensor.contiguous())
+                return local
+
+        rank = dist.get_rank()
+        num_rows, num_heads, head_dim = 7, 2, 8
+        generator = torch.Generator(device=device)
+        generator.manual_seed(1200 + rank)
+        partial_output = torch.randn(
+            num_rows,
+            num_heads,
+            head_dim,
+            dtype=torch.bfloat16,
+            device=device,
+            generator=generator,
+        )
+        partial_lse = torch.randn(
+            num_rows,
+            num_heads,
+            dtype=torch.float32,
+            device=device,
+            generator=generator,
+        )
+
+        gathered_output = [torch.empty_like(partial_output) for _ in range(2)]
+        gathered_lse = [torch.empty_like(partial_lse) for _ in range(2)]
+        dist.all_gather(gathered_output, partial_output)
+        dist.all_gather(gathered_lse, partial_lse)
+        lse_weights = torch.stack(gathered_lse).softmax(dim=0)
+        expected_global = (
+            torch.stack(gathered_output).float() * lse_weights.unsqueeze(-1)
+        ).sum(dim=0)
+
+        local_rows = ([0, 1, 6], [2, 3, 4, 5])[rank]
+        routing = PCPQueryRoutingMetadata(
+            global_from_gathered=torch.tensor(
+                [0, 1, 4, 5, 6, 7, 2], dtype=torch.int64, device=device
+            ),
+            local_from_global=torch.tensor(
+                local_rows, dtype=torch.int64, device=device
+            ),
+            local_num_tokens=len(local_rows),
+            local_num_tokens_padded=4,
+            gathered_from_global=torch.tensor(
+                [0, 1, 6, 0, 2, 3, 4, 5], dtype=torch.int64, device=device
+            ),
+        )
+        actual = cp_lse_ag_out_pcp_rs(
+            partial_output,
+            partial_lse,
+            routing,
+            NCCLGroup(),  # type: ignore[arg-type]
+        )
+        expected = expected_global.index_select(0, routing.local_from_global)
+        torch.testing.assert_close(actual.float(), expected, rtol=3e-2, atol=3e-2)
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.skipif(
+    torch.accelerator.device_count() < 2,
+    reason="Need at least 2 GPUs.",
+)
+def test_distributed_pcp_combine_matches_global_attention_rows():
+    _distributed_run(
+        _distributed_pcp_combine_worker,
+        world_size=2,
+        extra_env={},
+        timeout=300,
+    )
 
 
 def test_dcp_chunk_workspace_alignment_covers_interleave():

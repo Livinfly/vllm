@@ -13,7 +13,11 @@ from vllm.distributed import get_dcp_group, get_pcp_group
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.custom_op import CustomOp
-from vllm.model_executor.layers.attention.pcp import maybe_gather_indexer_k
+from vllm.model_executor.layers.attention.pcp import (
+    gather_pcp_query_rows,
+    get_pcp_local_rows_for_range,
+    maybe_gather_indexer_k,
+)
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     get_fp8_min_max,
 )
@@ -35,6 +39,7 @@ from vllm.v1.attention.backends.mla.indexer import (
     DeepseekV32IndexerMetadata,
 )
 from vllm.v1.attention.ops.common import pack_seq_triton, unpack_seq_triton
+from vllm.v1.utils import record_function_or_nullcontext
 from vllm.v1.worker.workspace import current_workspace_manager
 
 logger = init_logger(__name__)
@@ -95,9 +100,6 @@ def _merge_dcp_topk_global(
     if dcp_world_size <= 1:
         return
 
-    # CuteDSL-only path (no PyTorch fallback): Triton-pack each rank's
-    # (score, global_id) candidates on-device, all-gather, then the CuteDSL
-    # stable-topk selector.
     _assert_cutedsl_dcp_merge_supported(logits, topk_indices, topk_tokens)
     from vllm.model_executor.kernels.attention.dsa.dcp_indexer_cutedsl import (
         pack_dcp_topk_candidates_cutedsl,
@@ -118,9 +120,54 @@ def _merge_dcp_topk_global(
         cp_interleave,
         row_starts,
     )
-    gathered = get_dcp_group().all_gather(packed, dim=1)
+    with record_function_or_nullcontext(
+        "flashmla_sparse.comm.q_route.indexer_candidate_allgather"
+    ):
+        gathered = get_dcp_group().all_gather(packed, dim=1)
     stable_topk_from_gathered_candidates_cutedsl(
         gathered, topk_tokens, out=topk_indices
+    )
+
+
+def _pack_materialized_dcp_topk(
+    logits: torch.Tensor,
+    owner_topk: torch.Tensor,
+    candidates: torch.Tensor,
+    row_starts: torch.Tensor,
+    owner: int,
+    topk_tokens: int,
+    dcp_world_size: int,
+    cp_interleave: int,
+) -> None:
+    """Append one materialized owner's local candidates in global-ID form."""
+    _assert_cutedsl_dcp_merge_supported(logits, owner_topk, topk_tokens)
+    from vllm.model_executor.kernels.attention.dsa.dcp_indexer_cutedsl import (
+        pack_dcp_topk_candidates_cutedsl,
+    )
+
+    owner_candidates = candidates[:, owner * topk_tokens : (owner + 1) * topk_tokens]
+    pack_dcp_topk_candidates_cutedsl(
+        logits,
+        owner_topk,
+        owner_candidates,
+        owner,
+        dcp_world_size,
+        cp_interleave,
+        row_starts,
+    )
+
+
+def _select_materialized_dcp_topk(
+    candidates: torch.Tensor,
+    topk_indices: torch.Tensor,
+    topk_tokens: int,
+) -> None:
+    from vllm.model_executor.kernels.attention.dsa.dcp_indexer_cutedsl import (
+        stable_topk_from_gathered_candidates_cutedsl,
+    )
+
+    stable_topk_from_gathered_candidates_cutedsl(
+        candidates, topk_tokens, out=topk_indices
     )
 
 
@@ -364,9 +411,24 @@ def sparse_attn_indexer(
         )
     attn_metadata_narrowed = attn_metadata[k_cache_prefix]
     assert isinstance(attn_metadata_narrowed, DeepseekV32IndexerMetadata)
-    slot_mapping = attn_metadata_narrowed.slot_mapping
+    query_routing = attn_metadata_narrowed.pcp_query_routing
+    pcp_prefill_mode = attn_metadata_narrowed.pcp_prefill_mode
+    slot_mapping = (
+        attn_metadata_narrowed.pcp_cache_slot_mapping
+        if query_routing is not None
+        else attn_metadata_narrowed.slot_mapping
+    )
+    assert slot_mapping is not None
     has_decode = attn_metadata_narrowed.num_decodes > 0
     has_prefill = attn_metadata_narrowed.num_prefills > 0
+    if use_pcp and dcp_world_size > 1 and has_prefill and query_routing is None:
+        raise RuntimeError(
+            f"Sparse MLA {pcp_prefill_mode} requires global request metadata."
+        )
+    if use_pcp and dcp_world_size > 1 and has_decode and has_prefill:
+        raise RuntimeError(
+            "Sparse MLA PCP+DCP does not support mixed prefill/decode batches."
+        )
     num_decode_tokens = attn_metadata_narrowed.num_decode_tokens
 
     # q_scale is required iff the FP4 cache path is enabled; the FP8 path
@@ -380,8 +442,12 @@ def sparse_attn_indexer(
     # size while slot_mapping only covers actual tokens. Truncate k to avoid
     # out-of-bounds reads in the kernel.
     # Keep PCP padding so every rank contributes the same all-gather shape.
-    num_tokens = slot_mapping.shape[0]
-    if use_pcp:
+    num_tokens = (
+        query_routing.local_num_tokens_padded
+        if query_routing is not None
+        else slot_mapping.shape[0]
+    )
+    if use_pcp and query_routing is None:
         num_tokens //= get_pcp_group().world_size
     if k is not None:
         k = k[:num_tokens]
@@ -423,13 +489,20 @@ def sparse_attn_indexer(
                 # unnecessary work.
                 return topk_indices_buffer
 
+    if has_prefill and query_routing is not None and pcp_prefill_mode == "q_route":
+        query_range = "flashmla_sparse.comm.q_route.indexer_query_allgather"
+        q_quant = gather_pcp_query_rows(q_quant, query_routing, query_range)
+        weights = gather_pcp_query_rows(weights, query_routing, query_range)
+        if q_scale is not None:
+            q_scale = gather_pcp_query_rows(q_scale, query_routing, query_range)
+
     # The buffer must be pre-filled with -1 (the "no token" sentinel) before the
     # top-k kernels scatter valid indices into it. On the fused deepseek_v32
     # nvidia path, _fused_norm_rope_kernel already cleared the same
     # [:num_tokens, :topk] region earlier in this forward, so skip the redundant
     # fill.
     if not skip_topk_buffer_clear:
-        topk_indices_buffer[: hidden_states.shape[0]] = -1
+        topk_indices_buffer[: q_quant.shape[0]] = -1
     if has_prefill:
         prefill_metadata = attn_metadata_narrowed.prefill
         assert prefill_metadata is not None
@@ -446,45 +519,84 @@ def sparse_attn_indexer(
             values_spec,
             scales_spec,
         )
+        gathered_k_quant = None
+        gathered_k_scale = None
         for chunk in prefill_metadata.chunks:
-            cu_seqlen_ks = chunk.cu_seqlen_ks
-            cu_seqlen_ke = chunk.cu_seqlen_ke
             assert chunk.local_cu_seq_lens is not None
-            k_quant = k_quant_full[: chunk.max_local_total_seq_lens]
-            k_scale = k_scale_full[: chunk.max_local_total_seq_lens]
-            if not chunk.skip_kv_gather and chunk.local_total_seq_lens > 0:
-                ops.cp_gather_indexer_k_quant_cache(
-                    kv_cache,
-                    k_quant,
-                    k_scale,
-                    chunk.block_table,
-                    chunk.local_cu_seq_lens,
-                )
-
-            q_slice = q_quant[chunk.token_start : chunk.token_end]
-            q_scale_slice = (
-                q_scale[chunk.token_start : chunk.token_end]
-                if q_scale is not None
-                else None
+            materialize_kv = (
+                query_routing is not None and pcp_prefill_mode == "kv_materialize"
             )
-            topk_indices = topk_indices_buffer[
-                chunk.token_start : chunk.token_end, :topk_tokens
-            ]
+            k_rows = (
+                chunk.max_local_total_seq_lens
+                if materialize_kv
+                else chunk.local_total_seq_lens
+            )
+            k_quant = k_quant_full[:k_rows]
+            k_scale = k_scale_full[:k_rows]
+            if not chunk.skip_kv_gather and chunk.local_total_seq_lens > 0:
+                if materialize_kv and k_rows > chunk.local_total_seq_lens:
+                    k_quant[chunk.local_total_seq_lens :].zero_()
+                    k_scale[chunk.local_total_seq_lens :].zero_()
+                with record_function_or_nullcontext(
+                    "flashmla_sparse.compute.indexer_kv_pack"
+                ):
+                    ops.cp_gather_indexer_k_quant_cache(
+                        kv_cache,
+                        k_quant[: chunk.local_total_seq_lens],
+                        k_scale[: chunk.local_total_seq_lens],
+                        chunk.block_table,
+                        chunk.local_cu_seq_lens,
+                    )
 
-            if chunk.local_total_seq_lens == 0:
-                logits = q_slice.new_empty((q_slice.shape[0], 0), dtype=torch.float32)
-                topk_indices.fill_(-1)
+            local_rows = None
+            chunk_rows = None
+            if materialize_kv:
+                assert query_routing is not None
+                local_rows, chunk_rows = get_pcp_local_rows_for_range(
+                    query_routing,
+                    chunk.token_start,
+                    chunk.token_end,
+                )
+                q_slice = q_quant.index_select(0, local_rows)
+                weights_slice = weights.index_select(0, local_rows)
+                q_scale_slice = (
+                    q_scale.index_select(0, local_rows) if q_scale is not None else None
+                )
+                topk_indices = topk_indices_buffer.new_empty(
+                    (local_rows.shape[0], topk_tokens)
+                )
             else:
+                token_slice = slice(chunk.token_start, chunk.token_end)
+                q_slice = q_quant[token_slice]
+                weights_slice = weights[token_slice]
+                q_scale_slice = q_scale[token_slice] if q_scale is not None else None
+                topk_indices = topk_indices_buffer[token_slice, :topk_tokens]
+
+            def compute_topk(
+                owner_k_quant: torch.Tensor,
+                owner_k_scale: torch.Tensor,
+                cu_seqlen_ks: torch.Tensor,
+                cu_seqlen_ke: torch.Tensor,
+                owner_total_seq_lens: int,
+                q_slice: torch.Tensor,
+                q_scale_slice: torch.Tensor | None,
+                weights_slice: torch.Tensor,
+                topk_indices: torch.Tensor,
+            ) -> torch.Tensor:
+                if owner_total_seq_lens == 0:
+                    topk_indices.fill_(-1)
+                    return q_slice.new_empty((q_slice.shape[0], 0), dtype=torch.float32)
+
                 # DeepGEMM scalar-type tags (zero-copy): MXFP4 values → int8
                 # (kPackedFP4), scales → int32 squeezed to 1-D kv_sf / 2-D q_sf.
                 if use_fp4_cache:
                     q_slice_cast = q_slice.view(torch.int8)
-                    k_quant_cast = k_quant.view(torch.int8)
-                    k_scale_cast = k_scale.view(torch.int32).squeeze(-1)
+                    k_quant_cast = owner_k_quant.view(torch.int8)
+                    k_scale_cast = owner_k_scale.view(torch.int32).squeeze(-1)
                 else:
                     q_slice_cast = q_slice
-                    k_quant_cast = k_quant
-                    k_scale_cast = k_scale.view(torch.float32).squeeze(-1)
+                    k_quant_cast = owner_k_quant
+                    k_scale_cast = owner_k_scale.view(torch.float32).squeeze(-1)
                 if current_platform.is_xpu():
                     if q_scale_slice is not None:
                         raise RuntimeError("XPU fp8_mqa_logits does not support FP4 Q")
@@ -492,7 +604,7 @@ def sparse_attn_indexer(
                         q_slice_cast,
                         k_quant_cast,
                         k_scale_cast,
-                        weights[chunk.token_start : chunk.token_end],
+                        weights_slice,
                         cu_seqlen_ks,
                         cu_seqlen_ke,
                     )
@@ -500,7 +612,7 @@ def sparse_attn_indexer(
                     logits = fp8_fp4_mqa_logits(
                         (q_slice_cast, q_scale_slice),
                         (k_quant_cast, k_scale_cast),
-                        weights[chunk.token_start : chunk.token_end],
+                        weights_slice,
                         cu_seqlen_ks,
                         cu_seqlen_ke,
                         clean_logits=False,
@@ -516,16 +628,85 @@ def sparse_attn_indexer(
                     logits.stride(1),
                     topk_tokens,
                 )
+                return logits
 
-            _merge_dcp_topk_global(
-                logits,
-                topk_indices,
-                topk_tokens,
-                dcp_rank,
-                dcp_world_size,
-                cp_kv_cache_interleave_size,
-                row_starts=chunk.cu_seqlen_ks,
-            )
+            if materialize_kv:
+                assert chunk.dcp_cu_seqlen_ks is not None
+                assert chunk.dcp_cu_seqlen_ke is not None
+                assert chunk.dcp_total_seq_lens is not None
+                if not chunk.skip_kv_gather:
+                    with record_function_or_nullcontext(
+                        "flashmla_sparse.comm.kv_materialize.indexer_kv_allgather"
+                    ):
+                        gathered_k_quant = get_dcp_group().all_gather(k_quant, dim=0)
+                        gathered_k_scale = get_dcp_group().all_gather(k_scale, dim=0)
+                assert gathered_k_quant is not None and gathered_k_scale is not None
+                if q_slice.shape[0] == 0:
+                    continue
+                assert chunk_rows is not None
+                candidates = torch.empty(
+                    (q_slice.shape[0], dcp_world_size * topk_tokens, 2),
+                    dtype=torch.float32,
+                    device=q_slice.device,
+                )
+                owner_stride = chunk.max_local_total_seq_lens
+                for owner in range(dcp_world_size):
+                    owner_total = chunk.dcp_total_seq_lens[owner]
+                    owner_slice = slice(
+                        owner * owner_stride,
+                        owner * owner_stride + owner_total,
+                    )
+                    owner_cu_seqlen_ks = chunk.dcp_cu_seqlen_ks[owner].index_select(
+                        0, chunk_rows
+                    )
+                    owner_cu_seqlen_ke = chunk.dcp_cu_seqlen_ke[owner].index_select(
+                        0, chunk_rows
+                    )
+                    logits = compute_topk(
+                        gathered_k_quant[owner_slice],
+                        gathered_k_scale[owner_slice],
+                        owner_cu_seqlen_ks,
+                        owner_cu_seqlen_ke,
+                        owner_total,
+                        q_slice,
+                        q_scale_slice,
+                        weights_slice,
+                        topk_indices,
+                    )
+                    _pack_materialized_dcp_topk(
+                        logits,
+                        topk_indices,
+                        candidates,
+                        owner_cu_seqlen_ks,
+                        owner,
+                        topk_tokens,
+                        dcp_world_size,
+                        cp_kv_cache_interleave_size,
+                    )
+                _select_materialized_dcp_topk(candidates, topk_indices, topk_tokens)
+                assert local_rows is not None
+                topk_indices_buffer.index_copy_(0, local_rows, topk_indices)
+            else:
+                logits = compute_topk(
+                    k_quant,
+                    k_scale,
+                    chunk.cu_seqlen_ks,
+                    chunk.cu_seqlen_ke,
+                    chunk.local_total_seq_lens,
+                    q_slice,
+                    q_scale_slice,
+                    weights_slice,
+                    topk_indices,
+                )
+                _merge_dcp_topk_global(
+                    logits,
+                    topk_indices,
+                    topk_tokens,
+                    dcp_rank,
+                    dcp_world_size,
+                    cp_kv_cache_interleave_size,
+                    row_starts=chunk.cu_seqlen_ks,
+                )
 
     if has_decode:
         decode_metadata = attn_metadata_narrowed.decode
@@ -807,29 +988,30 @@ class SparseAttnIndexer(CustomOp):
             q_values, q_scale = q_quant
         else:
             q_values, q_scale = q_quant, None
-        return torch.ops.vllm.sparse_attn_indexer(
-            hidden_states,
-            _encode_layer_name(self.k_cache.prefix),
-            self.k_cache.kv_cache,
-            q_values,
-            q_scale,
-            k,
-            weights,
-            self.quant_block_size,
-            self.scale_fmt,
-            self.topk_tokens,
-            self.head_dim,
-            self.max_model_len,
-            self.max_total_seq_len,
-            self.topk_indices_buffer,
-            self.skip_k_cache_insert,
-            self.use_pcp,
-            _encode_layer_name(self.dense_mha_metadata_layer_name),
-            self.use_fp4_cache,
-            self.dcp_rank,
-            self.dcp_world_size,
-            self.cp_kv_cache_interleave_size,
-        )
+        with record_function_or_nullcontext("flashmla_sparse.attention.indexer"):
+            return torch.ops.vllm.sparse_attn_indexer(
+                hidden_states,
+                _encode_layer_name(self.k_cache.prefix),
+                self.k_cache.kv_cache,
+                q_values,
+                q_scale,
+                k,
+                weights,
+                self.quant_block_size,
+                self.scale_fmt,
+                self.topk_tokens,
+                self.head_dim,
+                self.max_model_len,
+                self.max_total_seq_len,
+                self.topk_indices_buffer,
+                self.skip_k_cache_insert,
+                self.use_pcp,
+                _encode_layer_name(self.dense_mha_metadata_layer_name),
+                self.use_fp4_cache,
+                self.dcp_rank,
+                self.dcp_world_size,
+                self.cp_kv_cache_interleave_size,
+            )
 
     def forward_xpu(
         self,

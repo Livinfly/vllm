@@ -1531,6 +1531,14 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 # indices from the previous real batch.
                 for_capture=dummy_run and batch_desc.cg_mode == CUDAGraphMode.FULL,
             )
+            if self.pcp_manager is not None and not dummy_run:
+                attn_metadata.update(
+                    self.pcp_manager.build_query_routed_attn_metadata(
+                        attn_metadata,
+                        self.attn_groups,
+                        self.kv_cache_config,
+                    )
+                )
 
         input_ids = input_batch.input_ids
         inputs_embeds = None

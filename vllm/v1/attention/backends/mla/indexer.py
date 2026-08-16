@@ -30,6 +30,7 @@ from vllm.v1.attention.backend import (
     AttentionMetadataBuilder,
     CommonAttentionMetadata,
     MultipleOf,
+    PCPQueryRoutingMetadata,
 )
 from vllm.v1.attention.backends.mla.compressor_utils import get_compressed_slot_mapping
 from vllm.v1.attention.backends.utils import (
@@ -133,6 +134,10 @@ class DeepseekV32IndexerBackend(AttentionBackend):
         return True
 
     @classmethod
+    def requires_pcp_query_routing(cls) -> bool:
+        return True
+
+    @classmethod
     def supports_device_cpu_query_lens_mismatch(cls) -> bool:
         # Only the varlen paged MQA logits kernel takes per-request query
         # lengths from device tensors; otherwise the indexer needs uniform ones.
@@ -204,6 +209,9 @@ class DeepseekV32IndexerPrefillChunkMetadata:
     local_cu_seq_lens: torch.Tensor | None = None
     local_total_seq_lens: int = 0
     max_local_total_seq_lens: int = 0
+    dcp_cu_seqlen_ks: tuple[torch.Tensor, ...] | None = None
+    dcp_cu_seqlen_ke: tuple[torch.Tensor, ...] | None = None
+    dcp_total_seq_lens: tuple[int, ...] | None = None
 
 
 _BUILD_PREFILL_CHUNK_METADATA_INPUT_VARIANTS = (
@@ -448,6 +456,9 @@ class DeepseekV32IndexerMetadata:
 
     decode: DeepSeekV32IndexerDecodeMetadata | None = None
     prefill: DeepseekV32IndexerPrefillMetadata | None = None
+    pcp_query_routing: PCPQueryRoutingMetadata | None = None
+    pcp_cache_slot_mapping: torch.Tensor | None = None
+    pcp_prefill_mode: str = "q_route"
 
 
 def get_max_prefill_buffer_size(vllm_config: VllmConfig):
@@ -509,6 +520,9 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
         self.dcp_rank = get_dcp_group().rank_in_group if self.dcp_world_size > 1 else 0
         self.pcp_world_size = parallel_config.prefill_context_parallel_size
         self.use_pcp = self.pcp_world_size > 1
+        self.pcp_prefill_mode = (
+            self.vllm_config.attention_config.sparse_mla_pcp_prefill_mode
+        )
         self.cp_kv_cache_interleave_size = parallel_config.cp_kv_cache_interleave_size
         # The DCP sparse-indexer code is parameterized by interleave size, but
         # interleave > 1 is not yet validated end-to-end (gsm8k parity fails),
@@ -906,6 +920,11 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
                     dcp_rank=self.dcp_rank,
                     dcp_world_size=self.dcp_world_size,
                     cp_kv_cache_interleave_size=self.cp_kv_cache_interleave_size,
+                    materialize_dcp_kv=(
+                        self.use_pcp
+                        and self.dcp_world_size > 1
+                        and self.pcp_prefill_mode == "kv_materialize"
+                    ),
                 )
                 # Skip when total_seq_lens is 0 (i.e., no compressed token).
                 if metadata is not None:
@@ -1045,6 +1064,7 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
             num_prefill_tokens=num_prefill_tokens,
             prefill=prefill_metadata,
             decode=decode_metadata,
+            pcp_prefill_mode=self.pcp_prefill_mode,
         )
 
         return attn_metadata
@@ -1065,6 +1085,7 @@ def build_prefill_chunk_metadata(
     dcp_rank: int = 0,
     dcp_world_size: int = 1,
     cp_kv_cache_interleave_size: int = 1,
+    materialize_dcp_kv: bool = False,
 ) -> DeepseekV32IndexerPrefillChunkMetadata | None:
     total_seq_lens = compressed_seq_lens_cpu[start_idx:end_idx].sum().item()
     if total_seq_lens == 0:
@@ -1082,6 +1103,8 @@ def build_prefill_chunk_metadata(
     local_cu_seq_lens = cu_seq_lens
     local_total_seq_lens = total_seq_lens
     max_local_total_seq_lens = total_seq_lens
+    dcp_cu_seq_lens = None
+    dcp_total_seq_lens = None
     if dcp_world_size > 1:
         # Per-rank local KV length under interleave-aware DCP sharding, shape
         # [num_reqs, dcp_world_size]. Reuse the canonical CP helper so the
@@ -1092,11 +1115,26 @@ def build_prefill_chunk_metadata(
             None,
             cp_kv_cache_interleave_size,
         )
-        this_rank_counts = local_seq_lens[:, dcp_rank].to(torch.int32)
-        local_cu_seq_lens = torch.zeros(num_reqs + 1, dtype=torch.int32, device=device)
-        torch.cumsum(this_rank_counts, dim=0, out=local_cu_seq_lens[1:])
-        local_total_seq_lens = int(local_cu_seq_lens[-1].item())
-        max_local_total_seq_lens = int(local_seq_lens.sum(dim=0).max().item())
+        rank_cu_seq_lens = []
+        for rank in range(dcp_world_size):
+            rank_cu = torch.zeros(num_reqs + 1, dtype=torch.int32, device=device)
+            torch.cumsum(
+                local_seq_lens[:, rank].to(torch.int32),
+                dim=0,
+                out=rank_cu[1:],
+            )
+            rank_cu_seq_lens.append(rank_cu)
+        dcp_total_seq_lens = tuple(
+            int(rank_cu[-1].item()) for rank_cu in rank_cu_seq_lens
+        )
+        max_local_total_seq_lens = max(dcp_total_seq_lens)
+        if materialize_dcp_kv:
+            # Keep every gathered owner's fp32 scale vector 128B-aligned.
+            max_local_total_seq_lens = (max_local_total_seq_lens + 31) // 32 * 32
+        local_cu_seq_lens = rank_cu_seq_lens[dcp_rank]
+        local_total_seq_lens = dcp_total_seq_lens[dcp_rank]
+        if materialize_dcp_kv:
+            dcp_cu_seq_lens = tuple(rank_cu_seq_lens)
 
     query_start_loc = (
         query_start_loc[start_idx : end_idx + 1] - query_start_loc[start_idx]
@@ -1113,27 +1151,44 @@ def build_prefill_chunk_metadata(
         qs_stop = total_query_len
     output_query_len = qs_stop - qs_start
 
-    cu_seq_len_ks = torch.empty(output_query_len, dtype=torch.int32, device=device)
-    cu_seq_len_ke = torch.empty(output_query_len, dtype=torch.int32, device=device)
+    def build_query_bounds(
+        rank: int,
+        row_starts: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        cu_seq_len_ks = torch.empty(output_query_len, dtype=torch.int32, device=device)
+        cu_seq_len_ke = torch.empty_like(cu_seq_len_ks)
+        _BUILD_PREFILL_CHUNK_METADATA_KERNEL(
+            query_start_loc,
+            uncompressed_seq_lens[start_idx:end_idx],
+            cu_seq_lens,
+            row_starts,
+            token_to_seq,
+            cu_seq_len_ks,
+            cu_seq_len_ke,
+            qs_start,
+            qs_stop,
+            rank,
+            dcp_world_size,
+            cp_kv_cache_interleave_size,
+            num_reqs=num_reqs,
+            COMPRESS_RATIO=compress_ratio,
+        )
+        return cu_seq_len_ks, cu_seq_len_ke
 
-    # Under DCP the kernel writes this rank's local row bounds into
-    # cu_seq_len_ks/ke; otherwise local_cu_seq_lens aliases cu_seq_lens.
-    _BUILD_PREFILL_CHUNK_METADATA_KERNEL(
-        query_start_loc,
-        uncompressed_seq_lens[start_idx:end_idx],
-        cu_seq_lens,
-        local_cu_seq_lens,
-        token_to_seq,
-        cu_seq_len_ks,
-        cu_seq_len_ke,
-        qs_start,
-        qs_stop,
-        dcp_rank,
-        dcp_world_size,
-        cp_kv_cache_interleave_size,
-        num_reqs=num_reqs,
-        COMPRESS_RATIO=compress_ratio,
-    )
+    dcp_cu_seqlen_ks = None
+    dcp_cu_seqlen_ke = None
+    if materialize_dcp_kv:
+        assert dcp_cu_seq_lens is not None
+        rank_bounds = tuple(
+            build_query_bounds(rank, rank_cu)
+            for rank, rank_cu in enumerate(dcp_cu_seq_lens)
+        )
+        dcp_cu_seqlen_ks = tuple(bounds[0] for bounds in rank_bounds)
+        dcp_cu_seqlen_ke = tuple(bounds[1] for bounds in rank_bounds)
+        cu_seq_len_ks = dcp_cu_seqlen_ks[dcp_rank]
+        cu_seq_len_ke = dcp_cu_seqlen_ke[dcp_rank]
+    else:
+        cu_seq_len_ks, cu_seq_len_ke = build_query_bounds(dcp_rank, local_cu_seq_lens)
 
     token_start = query_start_loc_cpu[start_idx].item()
     if query_slice is not None:
@@ -1157,4 +1212,7 @@ def build_prefill_chunk_metadata(
         local_cu_seq_lens=local_cu_seq_lens,
         local_total_seq_lens=local_total_seq_lens,
         max_local_total_seq_lens=max_local_total_seq_lens,
+        dcp_cu_seqlen_ks=dcp_cu_seqlen_ks,
+        dcp_cu_seqlen_ke=dcp_cu_seqlen_ke,
+        dcp_total_seq_lens=dcp_total_seq_lens,
     )

@@ -6,12 +6,55 @@ from vllm.distributed.parallel_state import (
     get_pcp_group,
     get_tp_group,
 )
+from vllm.v1.attention.backend import PCPQueryRoutingMetadata
+from vllm.v1.utils import record_function_or_nullcontext
+
+
+def gather_pcp_query_rows(
+    tensor: torch.Tensor,
+    routing: PCPQueryRoutingMetadata,
+    nvtx_name: str = "flashmla_sparse.comm.pcp_query_allgather",
+) -> torch.Tensor:
+    """Replicate PCP-local rows and restore them to global query order."""
+    local_tokens = routing.local_num_tokens
+    padded_tokens = routing.local_num_tokens_padded
+    assert tensor.shape[0] >= local_tokens
+    if tensor.shape[0] < padded_tokens:
+        padded = tensor.new_zeros((padded_tokens, *tensor.shape[1:]))
+        padded[:local_tokens].copy_(tensor[:local_tokens])
+    else:
+        padded = tensor[:padded_tokens].contiguous()
+    with record_function_or_nullcontext(nvtx_name):
+        gathered = get_pcp_group().all_gather(padded, dim=0)
+    return gathered.index_select(0, routing.global_from_gathered)
+
+
+def select_pcp_query_rows(
+    tensor: torch.Tensor,
+    routing: PCPQueryRoutingMetadata,
+) -> torch.Tensor:
+    """Select this PCP rank's unpadded rows from global query order."""
+    return tensor.index_select(0, routing.local_from_global)
+
+
+def get_pcp_local_rows_for_range(
+    routing: PCPQueryRoutingMetadata,
+    start: int,
+    end: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return local row IDs and their offsets inside a global row range."""
+    global_rows = routing.local_from_global
+    local_rows = (
+        ((global_rows >= start) & (global_rows < end)).nonzero(as_tuple=False).flatten()
+    )
+    return local_rows, global_rows.index_select(0, local_rows) - start
 
 
 def _gather_prefill_cache_inputs(
     tensors: tuple[torch.Tensor, ...],
     slot_mapping: torch.Tensor,
     num_decode_tokens: int,
+    nvtx_name: str,
 ) -> tuple[tuple[torch.Tensor, ...], torch.Tensor]:
     """Keep replicated decode writes local and gather partitioned prefills."""
     local_num_tokens = tensors[0].shape[0]
@@ -22,10 +65,11 @@ def _gather_prefill_cache_inputs(
         return tensors, slot_mapping[:num_decode_tokens]
 
     pcp_group = get_pcp_group()
-    gathered_prefills = tuple(
-        pcp_group.all_gather(tensor[num_decode_tokens:].contiguous(), dim=0)
-        for tensor in tensors
-    )
+    with record_function_or_nullcontext(nvtx_name):
+        gathered_prefills = tuple(
+            pcp_group.all_gather(tensor[num_decode_tokens:].contiguous(), dim=0)
+            for tensor in tensors
+        )
     pcp_size = pcp_group.world_size
     gathered_slot_mapping = slot_mapping[: pcp_size * local_num_tokens]
     if num_decode_tokens == 0:
@@ -61,6 +105,7 @@ def maybe_gather_mla_latent_cache_inputs(
         (kv_c_normed, k_pe_flat),
         slot_mapping,
         num_decode_tokens,
+        "pcp.comm.cache.mla_latent_allgather",
     )
     cache_k_pe = cache_k_pe_flat.view(-1, *k_pe.shape[1:])
     return cache_kv_c, cache_k_pe, cache_slot_mapping
@@ -75,7 +120,10 @@ def maybe_gather_indexer_k(
     if not use_pcp:
         return k, slot_mapping
     (cache_k,), cache_slot_mapping = _gather_prefill_cache_inputs(
-        (k,), slot_mapping, num_decode_tokens
+        (k,),
+        slot_mapping,
+        num_decode_tokens,
+        "pcp.comm.cache.indexer_k_allgather",
     )
     return cache_k, cache_slot_mapping
 

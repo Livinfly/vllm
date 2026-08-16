@@ -16,7 +16,11 @@ from vllm.distributed import get_dcp_group
 from vllm.distributed.parallel_state import in_the_same_node_as
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
-from vllm.v1.attention.ops.common import cp_lse_ag_out_ar, cp_lse_ag_out_rs
+from vllm.v1.attention.ops.common import (
+    cp_lse_ag_out_ar,
+    cp_lse_ag_out_pcp_rs,
+    cp_lse_ag_out_rs,
+)
 from vllm.v1.attention.ops.dcp_alltoall import dcp_a2a_lse_reduce
 from vllm.v1.worker.ubatching import dbo_current_ubatch_id
 
@@ -621,6 +625,15 @@ class MLADCPManager:
             output_dtype,
             is_lse_base_on_e,
             use_pcp,
+        )
+        self.pcp_combine = (
+            functools.partial(
+                cp_lse_ag_out_pcp_rs,
+                cp_group=self.group,
+                is_lse_base_on_e=is_lse_base_on_e,
+            )
+            if use_pcp
+            else None
         )
         self.query_gather = (
             None

@@ -244,6 +244,7 @@ from vllm.model_executor.layers.attention.kv_transfer_utils import (
 )
 from vllm.model_executor.layers.attention.pcp import (
     finalize_mla_pcp_decode,
+    gather_pcp_query_rows,
     maybe_gather_mla_latent_cache_inputs,
 )
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
@@ -304,6 +305,7 @@ from vllm.v1.kv_cache_interface import (
     SlidingWindowMLASpec,
     get_kv_quant_mode,
 )
+from vllm.v1.utils import record_function_or_nullcontext
 
 logger = init_logger(__name__)
 
@@ -543,17 +545,31 @@ class MLAAttention(nn.Module, AttentionLayerBase):
         vllm_config = get_current_vllm_config()
         parallel_config = vllm_config.parallel_config
         self.use_pcp = parallel_config.prefill_context_parallel_size > 1
+        self.pcp_prefill_mode = vllm_config.attention_config.sparse_mla_pcp_prefill_mode
+        pcp_dcp_sparse = (
+            self.use_pcp
+            and self.impl.dcp_world_size > 1
+            and self.attn_backend.requires_pcp_query_routing()
+        )
         compilation_config = vllm_config.compilation_config
         if prefix in compilation_config.static_forward_context:
             raise ValueError(f"Duplicate layer name: {prefix}")
         compilation_config.static_forward_context[prefix] = self
 
         self.prefill_backend: MLAPrefillBackend | None
-        if self.impl.is_sparse and not self.impl.supports_dense_mha_prefill:
-            logger.warning_once(
-                "Sparse MLA impl has no dense-MHA prefill path; using the top-k "
-                "MQA path only."
-            )
+        if self.impl.is_sparse and (
+            not self.impl.supports_dense_mha_prefill or pcp_dcp_sparse
+        ):
+            if pcp_dcp_sparse:
+                logger.info_once(
+                    "Sparse MLA PCP+DCP %s uses the top-k MQA path only.",
+                    self.pcp_prefill_mode,
+                )
+            else:
+                logger.warning_once(
+                    "Sparse MLA impl has no dense-MHA prefill path; using the top-k "
+                    "MQA path only."
+                )
             self.prefill_backend = None
         else:
             try:
@@ -667,56 +683,66 @@ class MLAAttention(nn.Module, AttentionLayerBase):
             assert isinstance(slot_mapping, dict), (
                 f"Expected slot_mapping to be a dict, got {type(slot_mapping)}. "
             )
-            layer_slot_mapping = slot_mapping.get(self.layer_name)
-            kv_for_cache, kpe_for_cache, layer_slot_mapping = (
-                maybe_gather_mla_latent_cache_inputs(
+            with record_function_or_nullcontext(
+                "flashmla_sparse.attention.main"
+                if self.impl.is_sparse
+                else "mla_attention.main"
+            ):
+                layer_slot_mapping = slot_mapping.get(self.layer_name)
+                kv_for_cache, kpe_for_cache, layer_slot_mapping = (
+                    maybe_gather_mla_latent_cache_inputs(
+                        kv_c_normed,
+                        k_pe,
+                        layer_slot_mapping,
+                        attn_metadata.num_decode_tokens
+                        if attn_metadata is not None
+                        else None,
+                        self.use_pcp,
+                    )
+                )
+                self.impl.do_kv_cache_update(  # type: ignore[attr-defined]
+                    kv_for_cache,
+                    kpe_for_cache,
+                    self_kv_cache,
+                    layer_slot_mapping,
+                    self.kv_cache_dtype,
+                    self._k_scale,
+                )
+                output = torch.empty(output_shape, dtype=q.dtype, device=q.device)
+                self.forward_impl(
+                    q,
                     kv_c_normed,
                     k_pe,
-                    layer_slot_mapping,
-                    attn_metadata.num_decode_tokens
-                    if attn_metadata is not None
-                    else None,
-                    self.use_pcp,
+                    self_kv_cache,
+                    attn_metadata,
+                    output=output,
+                    q_dcp_replicated=q_dcp_replicated,
                 )
-            )
-            self.impl.do_kv_cache_update(  # type: ignore[attr-defined]
-                kv_for_cache,
-                kpe_for_cache,
-                self_kv_cache,
-                layer_slot_mapping,
-                self.kv_cache_dtype,
-                self._k_scale,
-            )
-            output = torch.empty(output_shape, dtype=q.dtype, device=q.device)
-            self.forward_impl(
-                q,
-                kv_c_normed,
-                k_pe,
-                self_kv_cache,
-                attn_metadata,
-                output=output,
-                q_dcp_replicated=q_dcp_replicated,
-            )
             return output
         else:
             encoded = _encode_layer_name(self.layer_name)
-            kv_cache_dummy_dep = torch.ops.vllm.unified_mla_kv_cache_update(
-                kv_c_normed,
-                k_pe,
-                encoded,
-                self.kv_cache_dtype,
-                self._k_scale,
-            )
-            output = torch.empty(output_shape, dtype=q.dtype, device=q.device)
-            torch.ops.vllm.unified_mla_attention_with_output(
-                q,
-                kv_c_normed,
-                k_pe,
-                output,
-                encoded,
-                kv_cache_dummy_dep=kv_cache_dummy_dep,
-                q_dcp_replicated=q_dcp_replicated,
-            )
+            with record_function_or_nullcontext(
+                "flashmla_sparse.attention.main"
+                if self.impl.is_sparse
+                else "mla_attention.main"
+            ):
+                kv_cache_dummy_dep = torch.ops.vllm.unified_mla_kv_cache_update(
+                    kv_c_normed,
+                    k_pe,
+                    encoded,
+                    self.kv_cache_dtype,
+                    self._k_scale,
+                )
+                output = torch.empty(output_shape, dtype=q.dtype, device=q.device)
+                torch.ops.vllm.unified_mla_attention_with_output(
+                    q,
+                    kv_c_normed,
+                    k_pe,
+                    output,
+                    encoded,
+                    kv_cache_dummy_dep=kv_cache_dummy_dep,
+                    q_dcp_replicated=q_dcp_replicated,
+                )
             return output
 
     def forward_impl(
@@ -777,7 +803,12 @@ class MLAAttention(nn.Module, AttentionLayerBase):
 
         fp8_attention = is_quantized_kv_cache(self.kv_cache_dtype)
 
-        num_actual_toks = attn_metadata.num_actual_tokens
+        pcp_query_routing = getattr(attn_metadata, "pcp_query_routing", None)
+        num_actual_toks = (
+            pcp_query_routing.local_num_tokens
+            if pcp_query_routing is not None
+            else attn_metadata.num_actual_tokens
+        )
         if self.use_pcp and self.impl.dcp_world_size > 1 and quant_key is not None:
             raise NotImplementedError(
                 "MRV2 MLA PCP+DCP does not support fused output quantization yet."
@@ -802,6 +833,12 @@ class MLAAttention(nn.Module, AttentionLayerBase):
         )
         num_mqa_tokens = attn_metadata.num_decode_tokens
         num_mha_tokens = q.size(0) - num_mqa_tokens
+
+        if pcp_query_routing is not None:
+            if not self.impl.is_sparse:
+                raise RuntimeError("PCP query routing requires sparse MLA.")
+            num_mqa_tokens = q.size(0)
+            num_mha_tokens = 0
 
         if self.impl.is_sparse and num_mha_tokens > 0:
             prefill = getattr(attn_metadata, "prefill", None)
@@ -932,6 +969,11 @@ class MLAAttention(nn.Module, AttentionLayerBase):
             else:
                 mqa_q = (mqa_ql_nope, mqa_q_pe)
             # concatenate nope + pe -> (B, N, L + P) (fp8 op above may have fused)
+            if pcp_query_routing is not None and self.pcp_prefill_mode == "q_route":
+                query_range = "flashmla_sparse.comm.q_route.main_query_allgather"
+                if isinstance(mqa_q, tuple):
+                    mqa_q = torch.cat(mqa_q, dim=-1)
+                mqa_q = gather_pcp_query_rows(mqa_q, pcp_query_routing, query_range)
             if self.impl.dcp_world_size > 1:
                 assert self.dcp_manager is not None
                 if self.use_pcp:
@@ -953,25 +995,43 @@ class MLAAttention(nn.Module, AttentionLayerBase):
             attn_out, lse = self.impl.forward_mqa(mqa_q, kv_cache, attn_metadata, self)  # type: ignore[attr-defined]
 
             # correct dcp attn_out with lse.
-            if self.impl.dcp_world_size > 1:
+            materialized_pcp_prefill = (
+                pcp_query_routing is not None
+                and self.pcp_prefill_mode == "kv_materialize"
+                and attn_metadata.num_prefills > 0
+            )
+            if self.impl.dcp_world_size > 1 and not materialized_pcp_prefill:
                 assert lse is not None
                 assert self.dcp_manager is not None
-                seq_lens = (
-                    attn_metadata.decode.seq_lens
-                    if attn_metadata.decode is not None
-                    else cast(torch.Tensor, attn_metadata.seq_lens)[  # type: ignore[attr-defined]
-                        : attn_metadata.num_decodes
+                if (
+                    pcp_query_routing is not None
+                    and self.pcp_prefill_mode == "q_route"
+                    and attn_metadata.num_prefills > 0
+                ):
+                    assert self.dcp_manager.pcp_combine is not None
+                    attn_out = self.dcp_manager.pcp_combine(
+                        attn_out,
+                        lse,
+                        routing=pcp_query_routing,
+                    )
+                else:
+                    decode_metadata = getattr(attn_metadata, "decode", None)
+                    seq_lens = (
+                        decode_metadata.seq_lens
+                        if decode_metadata is not None
+                        else cast(torch.Tensor, attn_metadata.seq_lens)[  # type: ignore[attr-defined]
+                            : attn_metadata.num_decodes
+                        ]
+                    )
+                    query_start_loc = attn_metadata.query_start_loc[
+                        : attn_metadata.num_decodes + 1
                     ]
-                )
-                query_start_loc = attn_metadata.query_start_loc[
-                    : attn_metadata.num_decodes + 1
-                ]
-                attn_out = self.dcp_manager.combine(
-                    attn_out,
-                    lse,
-                    seq_lens=seq_lens,
-                    query_start_loc=query_start_loc,
-                )
+                    attn_out = self.dcp_manager.combine(
+                        attn_out,
+                        lse,
+                        seq_lens=seq_lens,
+                        query_start_loc=query_start_loc,
+                    )
                 if self.use_pcp:
                     attn_out = finalize_mla_pcp_decode(attn_out, self.num_heads)
 

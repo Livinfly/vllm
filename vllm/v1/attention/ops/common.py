@@ -1,9 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+from typing import TYPE_CHECKING
+
 import torch
 
 from vllm.distributed.parallel_state import GroupCoordinator
 from vllm.triton_utils import tl, triton
+from vllm.v1.utils import record_function_or_nullcontext
+
+if TYPE_CHECKING:
+    from vllm.v1.attention.backend import PCPQueryRoutingMetadata
 
 
 def mask_dcp_empty_shards_(
@@ -215,6 +221,7 @@ def _cp_lse_common(
     is_lse_base_on_e=True,
     seq_lens: torch.Tensor | None = None,
     query_start_loc: torch.Tensor | None = None,
+    all_gather_nvtx_name: str = "mla_dcp.comm.lse_allgather",
 ):
     """
     cp_attn_out: [ B, H, D ]
@@ -228,9 +235,10 @@ def _cp_lse_common(
 
     cp_attn_lse = cp_attn_lse.contiguous()
     mask_dcp_empty_shards_(cp_attn_lse, seq_lens, query_start_loc)
-    lses = cp_group.all_gather(cp_attn_lse, dim=0).reshape(
-        (cp_group.world_size,) + cp_attn_lse.shape
-    )
+    with record_function_or_nullcontext(all_gather_nvtx_name):
+        lses = cp_group.all_gather(cp_attn_lse, dim=0).reshape(
+            (cp_group.world_size,) + cp_attn_lse.shape
+        )
     out, lse = correct_attn_out(
         cp_attn_out,
         lses,
@@ -302,6 +310,39 @@ def cp_lse_ag_out_ar(
     if return_lse:
         return out, lse
     return out
+
+
+def cp_lse_ag_out_pcp_rs(
+    cp_attn_out: torch.Tensor,
+    cp_attn_lse: torch.Tensor,
+    routing: "PCPQueryRoutingMetadata",
+    cp_group: GroupCoordinator,
+    ctx: CPTritonContext | None = None,
+    is_lse_base_on_e: bool = True,
+) -> torch.Tensor:
+    """Merge DCP shards and return rows to their source PCP rank."""
+    out, _ = _cp_lse_common(
+        cp_attn_out,
+        cp_attn_lse,
+        cp_group,
+        ctx=ctx,
+        is_lse_base_on_e=is_lse_base_on_e,
+        all_gather_nvtx_name="flashmla_sparse.comm.q_route.main_lse_allgather",
+    )
+    gathered_from_global = routing.gathered_from_global
+    if gathered_from_global is None:
+        raise ValueError("PCP token reduce-scatter requires gathered row metadata")
+    expected_rows = routing.local_num_tokens_padded * cp_group.world_size
+    if gathered_from_global.shape[0] != expected_rows:
+        raise ValueError(
+            "PCP token reduce-scatter metadata does not match the DCP world size"
+        )
+    rank_major_out = out.index_select(0, gathered_from_global)
+    with record_function_or_nullcontext(
+        "flashmla_sparse.comm.q_route.main_output_reduce_scatter"
+    ):
+        local_out = cp_group.reduce_scatter(rank_major_out, dim=0)
+    return local_out[: routing.local_num_tokens]
 
 
 @triton.jit

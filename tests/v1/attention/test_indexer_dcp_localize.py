@@ -577,7 +577,7 @@ def test_sparse_prefill_dcp_metadata_localizes_causal_bounds():
     seq_lens_cpu = torch.tensor([seq_len], dtype=torch.int32)
     block_table = torch.zeros((1, 1), dtype=torch.int32, device=device)
 
-    def build(dcp_world_size, dcp_rank, interleave=1):
+    def build(dcp_world_size, dcp_rank, interleave=1, materialize=False):
         chunk = build_prefill_chunk_metadata(
             start_idx=0,
             end_idx=1,
@@ -591,6 +591,7 @@ def test_sparse_prefill_dcp_metadata_localizes_causal_bounds():
             dcp_rank=dcp_rank,
             dcp_world_size=dcp_world_size,
             cp_kv_cache_interleave_size=interleave,
+            materialize_dcp_kv=materialize,
         )
         assert chunk is not None
         torch.accelerator.synchronize()
@@ -639,6 +640,22 @@ def test_sparse_prefill_dcp_metadata_localizes_causal_bounds():
         chunk.cu_seqlen_ke.cpu(),
         torch.tensor([1, 2, 2, 2, 2, 2, 2, 2], dtype=torch.int32),
     )
+
+    chunk = build(dcp_world_size=4, dcp_rank=0, materialize=True)
+    assert chunk.dcp_cu_seqlen_ks is not None
+    assert chunk.dcp_cu_seqlen_ke is not None
+    assert chunk.dcp_total_seq_lens == (2, 2, 2, 2)
+    assert chunk.max_local_total_seq_lens == 32
+    for rank in range(4):
+        expected_ends = torch.tensor(
+            [_local_count(length, rank, 4, 1) for length in range(1, seq_len + 1)],
+            dtype=torch.int32,
+        )
+        torch.testing.assert_close(
+            chunk.dcp_cu_seqlen_ks[rank].cpu(),
+            torch.zeros(seq_len, dtype=torch.int32),
+        )
+        torch.testing.assert_close(chunk.dcp_cu_seqlen_ke[rank].cpu(), expected_ends)
 
 
 @pytest.mark.skipif(not current_platform.is_cuda(), reason="This test requires CUDA")

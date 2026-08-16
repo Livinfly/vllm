@@ -12,6 +12,7 @@ from vllm.v1.attention.backends.registry import AttentionBackendEnum
 
 IndexerKVDType = Literal["bf16", "fp8", "mxfp4", "nvfp4"]
 MiniMaxM3MSADecodeBackend = Literal["triton", "cutlass"]
+SparseMLAPCPPrefillMode = Literal["q_route", "kv_materialize"]
 
 
 @config
@@ -79,6 +80,14 @@ class AttentionConfig:
     """Force sparse MLA to use forward_mqa for all requests, including prefill.
     When False (default), pure prefill batches use forward_mha when implemented.
     Set to True to always use the MQA path."""
+
+    sparse_mla_pcp_prefill_mode: SparseMLAPCPPrefillMode = "q_route"
+    """Sparse MLA PCP+DCP prefill strategy.
+
+    ``q_route`` replicates PCP query rows across DCP cache owners.
+    ``kv_materialize`` gathers request-scoped owner KV into a transient
+    workspace and keeps query rows local.
+    """
 
     flex_attn_block_m: int | None = None
     """Triton kernel BLOCK_M tile size for flex attention.
