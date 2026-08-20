@@ -1,7 +1,28 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from typing import Literal
+
 import torch
+
+OwnerHistoryIndexerPrefillMode = Literal["query_route", "peer_materialize"]
+
+
+def get_owner_history_indexer_prefill_mode(
+    cp_kv_cache_interleave_size: int,
+    block_size: int,
+) -> OwnerHistoryIndexerPrefillMode:
+    """Select the owner-history indexer path for the physical KV layout."""
+    if cp_kv_cache_interleave_size == 1:
+        return "query_route"
+    if cp_kv_cache_interleave_size == block_size:
+        return "peer_materialize"
+    raise NotImplementedError(
+        "Owner-history sparse-indexer prefill requires token-interleaved "
+        "ownership or page-granular ownership: "
+        "cp_kv_cache_interleave_size must be 1 or equal the KV block size "
+        f"({block_size}), got {cp_kv_cache_interleave_size}."
+    )
 
 
 def validate_owner_history_peer_cache_binding(

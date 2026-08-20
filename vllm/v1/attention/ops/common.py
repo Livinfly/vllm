@@ -1,9 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+from typing import TYPE_CHECKING
+
 import torch
 
 from vllm.distributed.parallel_state import GroupCoordinator
 from vllm.triton_utils import tl, triton
+
+if TYPE_CHECKING:
+    from vllm.v1.attention.backend import PCPQueryRoutingMetadata
 
 
 @triton.jit
@@ -297,6 +302,37 @@ def cp_lse_ag_out_ar(
     if return_lse:
         return out, lse
     return out
+
+
+def cp_lse_ag_out_pcp_rs(
+    cp_attn_out: torch.Tensor,
+    cp_attn_lse: torch.Tensor,
+    routing: "PCPQueryRoutingMetadata",
+    cp_group: GroupCoordinator,
+    ctx: CPTritonContext | None = None,
+    is_lse_base_on_e: bool = True,
+) -> torch.Tensor:
+    """Merge DCP shards and return rows to their source PCP rank."""
+    if cp_group.world_size == 1:
+        return cp_attn_out[: routing.local_num_tokens]
+    gathered_from_global = routing.gathered_from_global
+    if gathered_from_global is None:
+        raise ValueError("PCP token reduce-scatter requires gathered row metadata")
+    expected_rows = routing.local_num_tokens_padded * cp_group.world_size
+    if gathered_from_global.shape[0] != expected_rows:
+        raise ValueError(
+            "PCP token reduce-scatter metadata does not match the DCP world size"
+        )
+    rank_major_out = cp_attn_out.index_select(0, gathered_from_global)
+    rank_major_lse = cp_attn_lse.index_select(0, gathered_from_global)
+    local_out = cp_lse_ag_out_rs_batch(
+        rank_major_out,
+        rank_major_lse,
+        cp_group,
+        ctx=ctx,
+        is_lse_base_on_e=is_lse_base_on_e,
+    )
+    return local_out[: routing.local_num_tokens]
 
 
 @triton.jit

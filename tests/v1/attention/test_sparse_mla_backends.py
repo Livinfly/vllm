@@ -1553,6 +1553,7 @@ def test_flashmla_direct_owner_history_uses_cached_peer_slots(monkeypatch):
     )
     impl = SimpleNamespace(
         dcp_world_size=4,
+        need_to_return_lse_for_decode=True,
         _fp8_flash_mla_kernel=run_kernel,
     )
     layer = SimpleNamespace(
@@ -1561,7 +1562,7 @@ def test_flashmla_direct_owner_history_uses_cached_peer_slots(monkeypatch):
         owner_peer_slot_cache=FakeOwnerPeerSlotCache(),
     )
 
-    output = FlashMLASparseImpl._forward_fp8_kv_mixed_batch(
+    output, lse = FlashMLASparseImpl._forward_fp8_kv_mixed_batch(
         impl,
         q,
         torch.empty(0, device=DEVICE_TYPE),
@@ -1571,6 +1572,7 @@ def test_flashmla_direct_owner_history_uses_cached_peer_slots(monkeypatch):
     )
 
     assert output.shape == (num_tokens, 2, 1)
+    assert lse is None
     assert len(calls) == 1
     assert calls[0][0] == num_tokens
     assert calls[0][2] == {
@@ -1580,6 +1582,86 @@ def test_flashmla_direct_owner_history_uses_cached_peer_slots(monkeypatch):
         "block_size": 64,
     }
     torch.testing.assert_close(captured_indices[0], peer_topk.unsqueeze(0))
+
+
+def test_flashmla_collective_history_filters_dcp_slots_and_returns_lse(monkeypatch):
+    num_tokens = 2
+    topk = 4
+    q = torch.ones(num_tokens, 2, 3, device=DEVICE_TYPE)
+    logical_topk = torch.arange(
+        num_tokens * topk, dtype=torch.int32, device=DEVICE_TYPE
+    ).view(num_tokens, topk)
+    local_topk = torch.tensor(
+        [[-1, -1, -1, -1], [0, 1, -1, -1]],
+        dtype=torch.int32,
+        device=DEVICE_TYPE,
+    )
+    filter_calls = []
+
+    def filter_dcp(req_id, block_table, indices, **kwargs):
+        filter_calls.append((req_id, block_table, indices, kwargs))
+        return local_topk
+
+    monkeypatch.setattr(
+        "vllm.v1.attention.backends.mla.flashmla_sparse."
+        "triton_filter_and_convert_dcp_index",
+        filter_dcp,
+    )
+    monkeypatch.setattr(
+        "vllm.v1.attention.backends.mla.flashmla_sparse."
+        "triton_convert_req_index_to_global_index",
+        lambda *_args, **_kwargs: pytest.fail(
+            "collective DCP history must localize global top-k indices"
+        ),
+    )
+
+    def run_kernel(**kwargs):
+        torch.testing.assert_close(kwargs["topk_indices"], local_topk.unsqueeze(0))
+        return (
+            torch.ones((1, num_tokens, 2, 1), device=DEVICE_TYPE),
+            torch.zeros((1, 2, num_tokens), device=DEVICE_TYPE),
+        )
+
+    metadata = SimpleNamespace(
+        fp8_extra_metadata=FlashMLASparseMetadata.FP8KernelMetadata(
+            scheduler_metadata=object(),  # type: ignore[arg-type]
+            dummy_block_table=torch.empty(1, 1, dtype=torch.int32, device=DEVICE_TYPE),
+            cache_lens=torch.empty(1, dtype=torch.int32, device=DEVICE_TYPE),
+        ),
+        req_id_per_token=torch.zeros(num_tokens, dtype=torch.int32, device=DEVICE_TYPE),
+        block_table=torch.empty(1, 3, dtype=torch.int32, device=DEVICE_TYPE),
+        block_size=64,
+        cp_kv_cache_interleave_size=64,
+    )
+    impl = SimpleNamespace(
+        dcp_world_size=2,
+        dcp_rank=1,
+        need_to_return_lse_for_decode=True,
+        _fp8_flash_mla_kernel=run_kernel,
+    )
+
+    output, lse = FlashMLASparseImpl._forward_fp8_kv_mixed_batch(
+        impl,
+        q,
+        torch.empty(0, device=DEVICE_TYPE),
+        logical_topk,
+        metadata,
+        SimpleNamespace(pcp_owner_history_direct=False),
+    )
+
+    assert len(filter_calls) == 1
+    assert filter_calls[0][3] == {
+        "dcp_size": 2,
+        "dcp_rank": 1,
+        "cp_kv_cache_interleave_size": 64,
+        "BLOCK_SIZE": 64,
+        "NUM_TOPK_TOKENS": topk,
+        "compact_valid_to_front": False,
+    }
+    assert lse is not None
+    torch.testing.assert_close(output[0], torch.zeros_like(output[0]))
+    assert torch.isneginf(lse[0]).all()
+    torch.testing.assert_close(output[1], torch.ones_like(output[1]))
 
 
 def test_flashmla_owner_decode_preserves_per_request_schedule(monkeypatch):
@@ -1941,6 +2023,7 @@ def test_flashmla_direct_pcp_selects_requested_prefill_path(
     builder = object.__new__(FlashMLASparseMetadataBuilder)
     builder.num_heads = num_heads
     builder.use_peer_pcp_fp8 = True
+    builder.use_pcp_collective = False
     builder.use_fp8_kv_cache = True
     mixed_metadata = object()
     separate_metadata = object()
@@ -1962,3 +2045,43 @@ def test_flashmla_direct_pcp_selects_requested_prefill_path(
     assert result.fp8_use_mixed_batch is expect_mixed
     expected_metadata = mixed_metadata if expect_mixed else separate_metadata
     assert result.fp8_extra_metadata is expected_metadata
+
+
+@pytest.mark.parametrize(("num_prefills", "num_decodes"), [(1, 0), (0, 1)])
+def test_flashmla_collective_pcp_forces_mixed_kernel(
+    monkeypatch, num_prefills, num_decodes
+):
+    metadata = SimpleNamespace(
+        num_prefills=num_prefills,
+        num_decodes=num_decodes,
+    )
+    monkeypatch.setattr(
+        SparseMLACommonMetadataBuilder,
+        "build",
+        lambda *args, **kwargs: metadata,  # noqa: ARG005
+    )
+    builder = object.__new__(FlashMLASparseMetadataBuilder)
+    builder.num_heads = 64
+    builder.use_peer_pcp_fp8 = False
+    builder.use_pcp_collective = True
+    builder.use_fp8_kv_cache = True
+    mixed_metadata = object()
+    builder._build_fp8_mixed_decode_prefill = MethodType(  # type: ignore[method-assign]
+        lambda self, common: mixed_metadata,
+        builder,  # noqa: ARG005
+    )
+    builder._build_fp8_separate_prefill_decode = MethodType(  # type: ignore[method-assign]
+        lambda self, common, metadata: pytest.fail(  # noqa: ARG005
+            "collective PCP prefill requires an LSE-returning FP8 path"
+        ),
+        builder,
+    )
+
+    result = FlashMLASparseMetadataBuilder.build(
+        builder,
+        common_prefix_len=0,
+        common_attn_metadata=object(),  # type: ignore[arg-type]
+    )
+
+    assert result.fp8_use_mixed_batch
+    assert result.fp8_extra_metadata is mixed_metadata

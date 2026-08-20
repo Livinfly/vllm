@@ -26,6 +26,7 @@ from vllm.v1.attention.backend import (
     AttentionMetadata,
     CommonAttentionMetadata,
     MultipleOf,
+    PCPQueryRoutingMetadata,
 )
 from vllm.v1.attention.backends.mla.owner_compute import (
     get_owner_prefill_mode,
@@ -35,6 +36,7 @@ from vllm.v1.attention.backends.mla.sparse_utils import (
     build_rotated_dcp_peer_block_table,
     filter_peer_slots_to_owner_local,
     triton_convert_req_index_to_global_index,
+    triton_filter_and_convert_dcp_index,
 )
 from vllm.v1.attention.backends.utils import (
     reshape_attn_output_for_spec_decode,
@@ -128,6 +130,10 @@ class FlashMLASparseBackend(AttentionBackend):
 
     @classmethod
     def is_sparse(cls) -> bool:
+        return True
+
+    @classmethod
+    def requires_pcp_query_routing(cls) -> bool:
         return True
 
     @classmethod
@@ -226,6 +232,7 @@ class FlashMLASparseMetadata(AttentionMetadata):
 
     fp8_extra_metadata: FP8SeparatePrefillDecode | FP8KernelMetadata | None = None
     fp8_use_mixed_batch: bool = False
+    pcp_query_routing: PCPQueryRoutingMetadata | None = None
 
 
 def get_prefill_workspace_size(max_model_len: int):
@@ -280,6 +287,11 @@ class FlashMLASparseMetadataBuilder(
         self.use_peer_pcp_fp8 = (
             envs.VLLM_USE_PCP_OWNER_HISTORY
             and parallel_config.prefill_context_parallel_size > 1
+        )
+        self.use_pcp_collective = (
+            not envs.VLLM_USE_PCP_OWNER_HISTORY
+            and parallel_config.prefill_context_parallel_size > 1
+            and parallel_config.decode_context_parallel_size > 1
         )
         max_num_seqs = vllm_config.scheduler_config.max_num_seqs
         # Shape: [max_num_seqs], all elements = topk_tokens (constant for full-CG)
@@ -518,6 +530,7 @@ class FlashMLASparseMetadataBuilder(
         fp8_use_mixed_batch = not materialize_owner_prefill and (
             self.num_heads < MIN_HEADS_FOR_BF16_PREFILL
             or (self.use_peer_pcp_fp8 and metadata.num_prefills > 0)
+            or self.use_pcp_collective
         )
         metadata.fp8_use_mixed_batch = fp8_use_mixed_batch
         if self.use_fp8_kv_cache:
@@ -534,6 +547,8 @@ class FlashMLASparseMetadataBuilder(
 
 
 class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
+    can_return_lse_for_decode: bool = True
+
     owner_compute_returns_projected_values: bool = True
     supports_owner_history_prefill_materialization: bool = True
 
@@ -957,6 +972,8 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
                 return_valid_counts=True,
             )
         else:
+            assert owner_peer_slot_cache is not None
+            assert isinstance(peer_block_stride, int)
             topk_indices, topk_length = owner_peer_slot_cache.get(
                 topk_indices.shape[0],
                 attn_metadata.block_table,
@@ -1072,7 +1089,7 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
         topk_indices: torch.Tensor,
         attn_metadata: FlashMLASparseMetadata,
         layer: AttentionLayer,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Mixed batch FP8 forward path that treats all tokens as one batch.
 
         This is equivalent to main branch's approach and avoids the BF16
@@ -1081,7 +1098,8 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
         """
         # Convert per-request indices to global slots (decode) or workspace
         # offsets (prefill).
-        if getattr(layer, "pcp_owner_history_direct", False):
+        use_owner_history = getattr(layer, "pcp_owner_history_direct", False)
+        if use_owner_history:
             peer_block_stride = getattr(layer, "pcp_peer_block_stride", None)
             if not isinstance(peer_block_stride, int) or peer_block_stride <= 0:
                 raise RuntimeError(
@@ -1100,6 +1118,18 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
                 cp_kv_cache_interleave_size=(attn_metadata.cp_kv_cache_interleave_size),
                 block_size=attn_metadata.block_size,
             )
+        elif self.dcp_world_size > 1:
+            topk_indices = triton_filter_and_convert_dcp_index(
+                attn_metadata.req_id_per_token[: topk_indices.shape[0]],
+                attn_metadata.block_table,
+                topk_indices,
+                dcp_size=self.dcp_world_size,
+                dcp_rank=self.dcp_rank,
+                cp_kv_cache_interleave_size=(attn_metadata.cp_kv_cache_interleave_size),
+                BLOCK_SIZE=attn_metadata.block_size,
+                NUM_TOPK_TOKENS=topk_indices.shape[1],
+                compact_valid_to_front=False,
+            )
         else:
             topk_indices = triton_convert_req_index_to_global_index(
                 attn_metadata.req_id_per_token[: topk_indices.shape[0]],
@@ -1115,15 +1145,22 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
         )
         fp8_metadata = attn_metadata.fp8_extra_metadata
 
-        _attn_out, _ = self._fp8_flash_mla_kernel(
+        _attn_out, _lse = self._fp8_flash_mla_kernel(
             q=q.unsqueeze(0),  # unsqueeze to add batch_dim: (T, H, D) -> (1, T, H, D)
             kv_c_and_k_pe_cache=kv_c_and_k_pe_cache,
             topk_indices=topk_indices.unsqueeze(0),  # (T, topk) -> (1, T, topk)
             kernel_metadata=fp8_metadata,
         )
 
-        # Output is (1, T, H, D_v), squeeze back to (T, H, D_v)
-        return _attn_out.squeeze(0)
+        out = _attn_out.squeeze(0)
+        if not self.need_to_return_lse_for_decode or use_owner_history:
+            return out, None
+
+        lse = _lse.squeeze(0).transpose(0, 1)
+        empty_rows = (topk_indices == -1).all(dim=-1)
+        out.masked_fill_(empty_rows.view(-1, 1, 1), 0.0)
+        lse.masked_fill_(empty_rows.view(-1, 1), float("-inf"))
+        return out.contiguous(), lse
 
     def _fp8_flash_mla_kernel(
         self,
@@ -1160,9 +1197,10 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
             softmax_scale=self.softmax_scale,
         )
 
-        # Slice output back to actual head count if we padded
+        # Slice output and LSE back to actual head count if we padded.
         if actual_num_heads < padded_num_heads:
             out = out[:, :, :actual_num_heads, :]
+            lse = lse[:, :actual_num_heads, :]
 
         return out, lse
 
@@ -1214,6 +1252,7 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
                     ):
                         reserved_q_start = candidate_start
             if reserved_q_start is not None:
+                assert reserved_q_padded is not None
                 q_padded = reserved_q_padded[
                     reserved_q_start : reserved_q_start + q.shape[0]
                 ]
@@ -1288,12 +1327,13 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
 
         use_fp8_cache = self.kv_cache_dtype == "fp8_ds_mla"
 
+        lse: torch.Tensor | None = None
         if not use_fp8_cache:
             attn_out = self._forward_bf16_kv(
                 q, kv_c_and_k_pe_cache, topk_indices, attn_metadata
             )
         elif attn_metadata.fp8_use_mixed_batch:
-            attn_out = self._forward_fp8_kv_mixed_batch(
+            attn_out, lse = self._forward_fp8_kv_mixed_batch(
                 q,
                 kv_c_and_k_pe_cache,
                 topk_indices,
@@ -1309,4 +1349,4 @@ class FlashMLASparseImpl(SparseMLACommonImpl[FlashMLASparseMetadata]):
                 layer,
             )
 
-        return attn_out, None
+        return attn_out, lse

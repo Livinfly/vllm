@@ -888,6 +888,10 @@ class GPUModelRunner(LoRAModelRunnerMixin):
 
         # Zero GPU memory for freshly allocated cache blocks to prevent
         # stale NaN/data from corrupting attention or SSM computation.
+        if self.pcp_manager is not None:
+            self.pcp_manager.validate_prefix_cache_block_copies(
+                bool(scheduler_output.kv_cache_block_copies)
+            )
         if scheduler_output.new_block_ids_to_zero:
             assert self.kv_block_zeroer is not None
             self.kv_block_zeroer.zero_block_ids(scheduler_output.new_block_ids_to_zero)
@@ -1297,6 +1301,14 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 self.attn_groups,
                 self.kv_cache_config,
             )
+            if self.pcp_manager is not None and not dummy_run:
+                attn_metadata.update(
+                    self.pcp_manager.build_query_routed_attn_metadata(
+                        attn_metadata,
+                        self.attn_groups,
+                        self.kv_cache_config,
+                    )
+                )
 
         input_ids = input_batch.input_ids
         inputs_embeds = None

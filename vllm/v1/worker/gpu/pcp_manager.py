@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -14,6 +15,10 @@ from vllm.distributed.parallel_state import (
 )
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
+from vllm.v1.attention.backend import PCPQueryRoutingMetadata
+from vllm.v1.attention.backends.mla.owner_history import (
+    get_owner_history_indexer_prefill_mode,
+)
 from vllm.v1.attention.backends.utils import PAD_SLOT_ID
 from vllm.v1.worker.gpu.block_table import BlockTables
 from vllm.v1.worker.gpu.buffer_utils import async_copy_to_gpu
@@ -28,11 +33,19 @@ from vllm.v1.worker.gpu.states import RequestState
 
 logger = init_logger(__name__)
 
+if TYPE_CHECKING:
+    from vllm.distributed.device_communicators.cuda_vmm import RankMajorPeerView
+    from vllm.model_executor.layers.attention.pcp_peer_cache import PCPPeerCacheFence
+    from vllm.v1.kv_cache_interface import KVCacheConfig
+    from vllm.v1.worker.utils import AttentionGroup
+
 
 def _validate_owner_history_axis(pcp_size: int, dcp_size: int) -> None:
     """Validate the currently supported owner-sharded history topology."""
-    if (pcp_size, dcp_size) != (4, 4):
-        raise NotImplementedError("Owner-sharded PCP history requires PCP=4 and DCP=4.")
+    if (pcp_size, dcp_size) not in ((2, 2), (4, 4)):
+        raise NotImplementedError(
+            "Owner-sharded PCP history requires PCP=DCP=2 or PCP=DCP=4."
+        )
 
 
 def _get_global_prefill_max_seq_len(
@@ -101,8 +114,8 @@ class PCPManager:
         self.cp_interleave = cp_interleave
         self.owner_history_enabled = owner_history_enabled
         self.peer_kv_enabled = owner_history_enabled
-        self._peer_cache_allocations = []
-        self._peer_cache_fence = None
+        self._peer_cache_allocations: list[RankMajorPeerView] = []
+        self._peer_cache_fence: PCPPeerCacheFence | None = None
 
         self._global_batch: InputBatch | None = None
         self._req_states = req_states
@@ -110,6 +123,7 @@ class PCPManager:
         self._hidden_restore_idx: torch.Tensor | None = None
         self._padded_gather_idx: torch.Tensor | None = None
         self._gathered_kv_write_mask: torch.Tensor | None = None
+        self._query_routing: PCPQueryRoutingMetadata | None = None
         self._pad_slot_id = torch.tensor(PAD_SLOT_ID, dtype=torch.int64, device=device)
 
         max_num_local_reqs = 2 * max_num_reqs if max_num_reqs is not None else None
@@ -238,9 +252,18 @@ class PCPManager:
 
         if not current_platform.is_cuda():
             raise NotImplementedError("Peer-mapped PCP KV requires CUDA.")
-        if model_config.hf_text_config.model_type != "glm_moe_dsa":
+        owner_axis = (
+            parallel_config.prefill_context_parallel_size,
+            parallel_config.decode_context_parallel_size,
+        )
+        _validate_owner_history_axis(*owner_axis)
+        owner_model_type = model_config.hf_text_config.model_type
+        expected_model_type = "deepseek_v32" if owner_axis == (2, 2) else "glm_moe_dsa"
+        if owner_model_type != expected_model_type:
             raise NotImplementedError(
-                "Peer-mapped PCP KV currently supports GLM-5.2 (glm_moe_dsa) only."
+                "Peer-mapped PCP KV requires DeepSeek-V3.2 for PCP2=DCP2 and "
+                "GLM-5.2 for PCP4=DCP4; got "
+                f"model_type={owner_model_type!r} with PCP/DCP={owner_axis}."
             )
         forward_layers = vllm_config.compilation_config.static_forward_context
         if not any(
@@ -254,10 +277,6 @@ class PCPManager:
             )
         if parallel_config.tensor_parallel_size != 1:
             raise NotImplementedError("Peer-mapped PCP KV currently requires TP=1.")
-        _validate_owner_history_axis(
-            parallel_config.prefill_context_parallel_size,
-            parallel_config.decode_context_parallel_size,
-        )
         if parallel_config.data_parallel_size != 1:
             raise NotImplementedError("Peer-mapped PCP KV currently requires DP=1.")
         if parallel_config.use_ubatching:
@@ -281,11 +300,15 @@ class PCPManager:
             raise NotImplementedError(
                 "Peer-mapped PCP KV requires --kv-cache-dtype fp8 or fp8_ds_mla."
             )
-        if parallel_config.cp_kv_cache_interleave_size != cache_config.block_size:
+        owner_indexer_prefill_mode = get_owner_history_indexer_prefill_mode(
+            parallel_config.cp_kv_cache_interleave_size,
+            cache_config.block_size,
+        )
+        if owner_axis == (4, 4) and owner_indexer_prefill_mode != "peer_materialize":
             raise NotImplementedError(
-                "Owner-sharded PCP history requires page-granular "
-                "ownership: cp_kv_cache_interleave_size must equal the KV "
-                f"block size ({cache_config.block_size})."
+                "The GLM-5.2 PCP4=DCP4 owner-history path requires page-granular "
+                "ownership: cp_kv_cache_interleave_size must equal the KV block "
+                f"size ({cache_config.block_size})."
             )
         supported_owner_backends = {
             (
@@ -315,10 +338,29 @@ class PCPManager:
                 "FlashInfer sparse backend with fp8 or the FlashMLA sparse "
                 "backend with fp8_ds_mla."
             )
-        if cache_config.enable_prefix_caching:
+        if owner_axis == (2, 2):
+            if envs.VLLM_PCP_OWNER_PREFILL_MODE != "direct":
+                raise NotImplementedError(
+                    "The experimental DeepSeek-V3.2 PCP2=DCP2 owner-history path "
+                    "requires VLLM_PCP_OWNER_PREFILL_MODE=direct."
+                )
+            if not all(
+                type(layer.impl).__module__
+                == "vllm.v1.attention.backends.mla.flashmla_sparse"
+                and type(layer.impl).__name__ == "FlashMLASparseImpl"
+                and cache_config.cache_dtype == "fp8_ds_mla"
+                for layer in forward_layers.values()
+                if type(layer).__module__ == "vllm.models.deepseek_v32.nvidia.attention"
+                and type(layer).__name__ == "DeepseekV32Attention"
+            ):
+                raise NotImplementedError(
+                    "The experimental DeepSeek-V3.2 PCP2=DCP2 owner-history path "
+                    "requires FLASHMLA_SPARSE with fp8_ds_mla KV cache."
+                )
+        elif cache_config.enable_prefix_caching:
             raise NotImplementedError(
-                "Peer-mapped PCP KV does not support prefix caching or "
-                "copy-on-write. Set --no-enable-prefix-caching."
+                "GLM-5.2 PCP4=DCP4 peer-mapped KV does not support prefix "
+                "caching. Set --no-enable-prefix-caching."
             )
         kv_transfer_config = vllm_config.kv_transfer_config
         if (
@@ -331,7 +373,9 @@ class PCPManager:
         if getattr(model_config, "enable_sleep_mode", False):
             raise NotImplementedError("Peer-mapped PCP KV does not support sleep mode.")
 
-    def allocate_peer_cache(self, size: int, block_stride_bytes: int):
+    def allocate_peer_cache(
+        self, size: int, block_stride_bytes: int
+    ) -> "RankMajorPeerView":
         """Collectively allocate one rank-local cache and its peer view."""
         if not self.peer_kv_enabled:
             raise RuntimeError("Peer-mapped PCP KV allocation is not enabled.")
@@ -349,11 +393,14 @@ class PCPManager:
             require_native_atomics=True,
             device=self.device,
         )
-        allocation.local_view.zero_()
+        local_view = allocation.local_view
+        if local_view is None:
+            raise RuntimeError("CUDA VMM allocation did not expose its local view.")
+        local_view.zero_()
         self._peer_cache_allocations.append(allocation)
         return allocation
 
-    def get_peer_cache_fence(self):
+    def get_peer_cache_fence(self) -> "PCPPeerCacheFence":
         if not self.peer_kv_enabled:
             raise RuntimeError("Peer-mapped PCP KV fencing is not enabled.")
         if self._peer_cache_fence is None:
@@ -365,6 +412,14 @@ class PCPManager:
                 get_pcp_group().cpu_group, self.device
             )
         return self._peer_cache_fence
+
+    def validate_prefix_cache_block_copies(self, has_block_copies: bool) -> None:
+        """Reject partial-hit copy-on-write outside the experiment contract."""
+        if self.owner_history_enabled and has_block_copies:
+            raise NotImplementedError(
+                "Owner-sharded PCP prefix caching currently supports full-block "
+                "hits only; partial-hit KV copy-on-write is not supported."
+            )
 
     @property
     def owner_sharded_history_enabled(self) -> bool:
@@ -662,6 +717,14 @@ class PCPManager:
         local_gather_idx = self._padded_gather_idx[
             rank_token_start : rank_token_start + num_local_tokens_padded
         ]
+        assert self._hidden_restore_idx is not None
+        self._query_routing = PCPQueryRoutingMetadata(
+            global_from_gathered=self._hidden_restore_idx,
+            local_from_global=local_gather_idx[:num_local_tokens],
+            local_num_tokens=num_local_tokens,
+            local_num_tokens_padded=num_local_tokens_padded,
+            gathered_from_global=self._padded_gather_idx,
+        )
         torch.index_select(
             global_batch.input_ids,
             0,
@@ -804,6 +867,84 @@ class PCPManager:
         )
         slot_mappings = self.prepare_slot_mappings()
         return block_tables, slot_mappings
+
+    def build_query_routed_attn_metadata(
+        self,
+        local_attn_metadata: dict[str, Any],
+        attn_groups: list[list["AttentionGroup"]],
+        kv_cache_config: "KVCacheConfig",
+    ) -> dict[str, Any]:
+        """Build sparse metadata in global request order for all-gather mode."""
+        if self.owner_history_enabled or self.dcp_world_size <= 1:
+            return {}
+        if self.pcp_world_size != self.dcp_world_size or self.pcp_rank != self.dcp_rank:
+            raise RuntimeError(
+                "PCP query routing requires identical PCP and DCP rank ordering."
+            )
+
+        assert self._global_batch is not None
+        assert self._query_routing is not None
+        assert self._block_tables is not None
+        assert self._global_batch_slot_mappings is not None
+
+        global_batch = self._global_batch
+        is_prefilling = global_batch.is_prefilling_np[: global_batch.num_reqs]
+        if not is_prefilling.any():
+            return {}
+        if not is_prefilling.all():
+            raise RuntimeError(
+                "Sparse MLA PCP+DCP does not support mixed prefill/decode batches."
+            )
+
+        routed_groups = [
+            [group for group in groups if group.backend.requires_pcp_query_routing()]
+            for groups in attn_groups
+        ]
+        if not any(routed_groups):
+            return {}
+
+        from vllm.v1.worker.gpu.attn_utils import build_attn_metadata
+
+        global_block_tables = self._block_tables.gather_block_tables(
+            global_batch.idx_mapping,
+            global_batch.num_reqs,
+        )
+        global_slot_mappings = self._global_batch_slot_mappings[
+            :, : global_batch.num_tokens
+        ]
+        global_prefill_max_seq_len = int(
+            global_batch.seq_lens_cpu_upper_bound[: global_batch.num_reqs].max().item()
+        )
+        routed = build_attn_metadata(
+            attn_groups=routed_groups,
+            num_reqs=global_batch.num_reqs,
+            num_tokens=global_batch.num_tokens,
+            query_start_loc_gpu=global_batch.query_start_loc,
+            query_start_loc_cpu=torch.from_numpy(global_batch.query_start_loc_np),
+            max_query_len=int(global_batch.num_scheduled_tokens.max()),
+            seq_lens=global_batch.seq_lens,
+            max_seq_len=global_prefill_max_seq_len,
+            block_tables=global_block_tables,
+            slot_mappings=global_slot_mappings,
+            kv_cache_config=kv_cache_config,
+            seq_lens_cpu_upper_bound=global_batch.seq_lens_cpu_upper_bound,
+            global_prefill_max_seq_len=global_prefill_max_seq_len,
+            dcp_local_seq_lens=global_batch.dcp_local_seq_lens,
+            positions=global_batch.positions,
+            is_prefilling=torch.from_numpy(global_batch.is_prefilling_np),
+        )
+
+        for groups in routed_groups:
+            for group in groups:
+                metadata = routed[group.layer_names[0]]
+                metadata.pcp_query_routing = self._query_routing
+                if group.backend.get_name() in (
+                    "DEEPSEEK_V32_INDEXER",
+                    "DEEPSEEK_V4_INDEXER",
+                ):
+                    local_metadata = local_attn_metadata[group.layer_names[0]]
+                    metadata.pcp_cache_slot_mapping = local_metadata.slot_mapping
+        return routed
 
     def prepare_slot_mappings(self) -> torch.Tensor:
         assert self._block_tables is not None

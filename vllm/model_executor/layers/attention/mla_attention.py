@@ -228,6 +228,7 @@ from vllm.model_executor.layers.attention.kv_transfer_utils import (
 )
 from vllm.model_executor.layers.attention.pcp import (
     finalize_mla_pcp_decode,
+    gather_pcp_query_rows,
     maybe_gather_mla_latent_cache_inputs,
 )
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
@@ -274,7 +275,11 @@ from vllm.v1.attention.backends.utils import (
     get_dcp_local_seq_lens,
     split_decodes_and_prefills,
 )
-from vllm.v1.attention.ops.common import cp_lse_ag_out_ar, cp_lse_ag_out_rs
+from vllm.v1.attention.ops.common import (
+    cp_lse_ag_out_ar,
+    cp_lse_ag_out_pcp_rs,
+    cp_lse_ag_out_rs,
+)
 from vllm.v1.attention.ops.dcp_alltoall import dcp_a2a_lse_reduce
 from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
 from vllm.v1.attention.ops.triton_merge_attn_states import mask_empty_context
@@ -742,7 +747,12 @@ class MLAAttention(nn.Module, AttentionLayerBase):
 
         fp8_attention = is_quantized_kv_cache(self.kv_cache_dtype)
 
-        num_actual_toks = attn_metadata.num_actual_tokens
+        pcp_query_routing = getattr(attn_metadata, "pcp_query_routing", None)
+        num_actual_toks = (
+            pcp_query_routing.local_num_tokens
+            if pcp_query_routing is not None
+            else attn_metadata.num_actual_tokens
+        )
         if self.use_pcp and self.impl.dcp_world_size > 1 and quant_key is not None:
             raise NotImplementedError(
                 "MRV2 MLA PCP+DCP does not support fused output quantization yet."
@@ -767,6 +777,12 @@ class MLAAttention(nn.Module, AttentionLayerBase):
         )
         num_mqa_tokens = attn_metadata.num_decode_tokens
         num_mha_tokens = q.size(0) - num_mqa_tokens
+
+        if pcp_query_routing is not None:
+            if not self.impl.is_sparse:
+                raise RuntimeError("PCP query routing requires sparse MLA.")
+            num_mqa_tokens = q.size(0)
+            num_mha_tokens = 0
 
         if self.impl.is_sparse and num_mha_tokens > 0:
             prefill_max_seq_len = attn_metadata.prefill_max_seq_len  # type: ignore[attr-defined]
@@ -879,6 +895,10 @@ class MLAAttention(nn.Module, AttentionLayerBase):
             else:
                 mqa_q = (mqa_ql_nope, mqa_q_pe)
             # concatenate nope + pe -> (B, N, L + P) (fp8 op above may have fused)
+            if pcp_query_routing is not None:
+                if isinstance(mqa_q, tuple):
+                    mqa_q = torch.cat(mqa_q, dim=-1)
+                mqa_q = gather_pcp_query_rows(mqa_q, pcp_query_routing)
             if self.impl.dcp_world_size > 1:
                 if self.use_pcp:
                     if self.impl.dcp_world_size > self.impl.pcp_world_size:
@@ -901,7 +921,15 @@ class MLAAttention(nn.Module, AttentionLayerBase):
             # correct dcp attn_out with lse.
             if self.impl.dcp_world_size > 1:
                 assert lse is not None
-                if self.dcp_a2a:
+                if pcp_query_routing is not None and attn_metadata.num_prefills > 0:
+                    attn_out = cp_lse_ag_out_pcp_rs(
+                        attn_out,
+                        lse,
+                        pcp_query_routing,
+                        get_dcp_group(),
+                        is_lse_base_on_e=self.impl.lse_base_on_e,
+                    )
+                elif self.dcp_a2a:
                     attn_out = dcp_a2a_lse_reduce(
                         attn_out,
                         lse,

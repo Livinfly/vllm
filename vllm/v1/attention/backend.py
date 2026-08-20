@@ -255,6 +255,11 @@ class AttentionBackend(ABC):
         return False
 
     @classmethod
+    def requires_pcp_query_routing(cls) -> bool:
+        """Whether DCP scoring requires globally aligned PCP query rows."""
+        return False
+
+    @classmethod
     def supports_per_head_quant_scales(cls) -> bool:
         return False
 
@@ -406,6 +411,20 @@ class AttentionMetadata:
 
 
 T = TypeVar("T", bound=AttentionMetadata)
+
+
+@dataclass(frozen=True)
+class PCPQueryRoutingMetadata:
+    """Maps PCP-local query rows to a shared global row order."""
+
+    global_from_gathered: torch.Tensor
+    """Selects global query order from rank-major padded PCP rows."""
+    local_from_global: torch.Tensor
+    """Selects this rank's unpadded query order from global rows."""
+    local_num_tokens: int
+    local_num_tokens_padded: int
+    gathered_from_global: torch.Tensor | None = None
+    """Selects rank-major padded PCP rows from global query order."""
 
 
 @dataclass

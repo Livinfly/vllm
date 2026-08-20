@@ -105,22 +105,25 @@ def test_dummy_owner_slots_keep_forward_shape_and_padding(monkeypatch) -> None:
     assert torch.all(owner_slots == -1)
 
 
-def test_owner_history_axis_accepts_pcp4_dcp4() -> None:
-    _validate_owner_history_axis(4, 4)
+@pytest.mark.parametrize("pcp_size,dcp_size", [(2, 2), (4, 4)])
+def test_owner_history_axis_accepts_supported_sizes(
+    pcp_size: int, dcp_size: int
+) -> None:
+    _validate_owner_history_axis(pcp_size, dcp_size)
 
 
 @pytest.mark.parametrize(
     "pcp_size,dcp_size",
-    [(2, 1), (4, 1), (2, 2), (8, 8), (4, 2)],
+    [(2, 1), (4, 1), (8, 8), (4, 2)],
 )
 def test_owner_history_axis_rejects_unsupported_sizes(
     pcp_size: int, dcp_size: int
 ) -> None:
-    with pytest.raises(NotImplementedError, match="PCP=4 and DCP=4"):
+    with pytest.raises(NotImplementedError, match="PCP=DCP=2 or PCP=DCP=4"):
         _validate_owner_history_axis(pcp_size, dcp_size)
 
 
-def test_owner_sharded_property_fails_closed_for_pcp2_dcp2() -> None:
+def test_owner_sharded_property_accepts_pcp2_dcp2() -> None:
     manager = PCPManager(
         pcp_world_size=2,
         pcp_rank=0,
@@ -128,8 +131,31 @@ def test_owner_sharded_property_fails_closed_for_pcp2_dcp2() -> None:
         dcp_world_size=2,
         owner_history_enabled=True,
     )
-    with pytest.raises(NotImplementedError, match="PCP=4 and DCP=4"):
-        _ = manager.owner_sharded_history_enabled
+    assert manager.owner_sharded_history_enabled
+
+
+def test_owner_history_prefix_cache_rejects_partial_hit_copy_on_write() -> None:
+    manager = PCPManager(
+        pcp_world_size=2,
+        pcp_rank=0,
+        device=torch.device("cpu"),
+        dcp_world_size=2,
+        owner_history_enabled=True,
+    )
+    manager.validate_prefix_cache_block_copies(False)
+    with pytest.raises(NotImplementedError, match="full-block hits only"):
+        manager.validate_prefix_cache_block_copies(True)
+
+
+def test_collective_history_allows_prefix_cache_block_copies() -> None:
+    manager = PCPManager(
+        pcp_world_size=2,
+        pcp_rank=0,
+        device=torch.device("cpu"),
+        dcp_world_size=2,
+        owner_history_enabled=False,
+    )
+    manager.validate_prefix_cache_block_copies(True)
 
 
 def test_global_prefill_max_is_scheduler_global_and_ignores_decodes() -> None:

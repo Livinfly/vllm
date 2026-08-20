@@ -14,7 +14,10 @@ from vllm.distributed import get_dcp_group, get_pcp_group
 from vllm.forward_context import get_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.custom_op import CustomOp
-from vllm.model_executor.layers.attention.pcp import maybe_gather_indexer_k
+from vllm.model_executor.layers.attention.pcp import (
+    gather_pcp_query_rows,
+    maybe_gather_indexer_k,
+)
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     get_fp8_min_max,
 )
@@ -291,10 +294,8 @@ def _run_pcp_dcp_routed_prefill(
         raise RuntimeError(
             "PCP-routed sparse prefill requires identical PCP/DCP rank axes."
         )
-    if cp_kv_cache_interleave_size != 1:
-        raise RuntimeError(
-            "PCP-routed sparse prefill supports only cp_kv_cache_interleave_size=1."
-        )
+    if cp_kv_cache_interleave_size <= 0:
+        raise RuntimeError("PCP-routed sparse prefill requires positive interleave.")
     if q_quant.shape[0] != weights.shape[0]:
         raise RuntimeError(
             "PCP-routed sparse prefill requires aligned Q and weight rows, got "
@@ -686,7 +687,13 @@ def sparse_attn_indexer(
         )
     attn_metadata_narrowed = attn_metadata[k_cache_prefix]
     assert isinstance(attn_metadata_narrowed, DeepseekV32IndexerMetadata)
-    slot_mapping = attn_metadata_narrowed.slot_mapping
+    query_routing = attn_metadata_narrowed.pcp_query_routing
+    slot_mapping = (
+        attn_metadata_narrowed.pcp_cache_slot_mapping
+        if query_routing is not None
+        else attn_metadata_narrowed.slot_mapping
+    )
+    assert slot_mapping is not None
     has_decode = attn_metadata_narrowed.num_decodes > 0
     has_prefill = attn_metadata_narrowed.num_prefills > 0
     num_decode_tokens = attn_metadata_narrowed.num_decode_tokens
@@ -702,8 +709,12 @@ def sparse_attn_indexer(
     # size while slot_mapping only covers actual tokens. Truncate k to avoid
     # out-of-bounds reads in the kernel.
     # Keep PCP padding so every rank contributes the same all-gather shape.
-    num_tokens = slot_mapping.shape[0]
-    if use_pcp:
+    num_tokens = (
+        query_routing.local_num_tokens_padded
+        if query_routing is not None
+        else slot_mapping.shape[0]
+    )
+    if use_pcp and query_routing is None:
         num_tokens //= get_pcp_group().world_size
     if k is not None:
         k = k[:num_tokens]
@@ -727,13 +738,19 @@ def sparse_attn_indexer(
             scale_fmt,
         )
 
+    if has_prefill and query_routing is not None:
+        q_quant = gather_pcp_query_rows(q_quant, query_routing)
+        weights = gather_pcp_query_rows(weights, query_routing)
+        if q_scale is not None:
+            q_scale = gather_pcp_query_rows(q_scale, query_routing)
+
     # The buffer must be pre-filled with -1 (the "no token" sentinel) before the
     # top-k kernels scatter valid indices into it. On the fused deepseek_v32
     # nvidia path, _fused_norm_rope_kernel already cleared the same
     # [:num_tokens, :topk] region earlier in this forward, so skip the redundant
     # fill.
     if not skip_topk_buffer_clear:
-        topk_indices_buffer[: hidden_states.shape[0]] = -1
+        topk_indices_buffer[: q_quant.shape[0]] = -1
     prefill_metadata = attn_metadata_narrowed.prefill
     if prefill_metadata is not None and prefill_metadata.pcp_routed_chunks is not None:
         _run_pcp_dcp_routed_prefill(

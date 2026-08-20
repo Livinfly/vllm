@@ -30,8 +30,12 @@ from vllm.v1.attention.backend import (
     AttentionMetadataBuilder,
     CommonAttentionMetadata,
     MultipleOf,
+    PCPQueryRoutingMetadata,
 )
 from vllm.v1.attention.backends.mla.compressor_utils import get_compressed_slot_mapping
+from vllm.v1.attention.backends.mla.owner_history import (
+    get_owner_history_indexer_prefill_mode,
+)
 from vllm.v1.attention.backends.utils import (
     get_dcp_local_seq_lens,
     split_decodes_and_prefills,
@@ -147,10 +151,11 @@ class DeepseekV32IndexerPCPRoutedPrefillChunkMetadata:
     max_local_total_seq_lens: int
 
 
-def _dcp_local_count_interleave_one(length: int, rank: int, world: int) -> int:
-    if length <= rank:
-        return 0
-    return (length + world - 1 - rank) // world
+def _dcp_local_count(length: int, rank: int, world: int, interleave: int) -> int:
+    cycle = world * interleave
+    full_cycles, remainder = divmod(length, cycle)
+    rank_remainder = min(max(remainder - rank * interleave, 0), interleave)
+    return full_cycles * interleave + rank_remainder
 
 
 def build_pcp_routed_prefill_chunks_from_gathered(
@@ -163,6 +168,7 @@ def build_pcp_routed_prefill_chunks_from_gathered(
     workspace_size: int,
     max_logits_bytes: int,
     source_token_capacity_per_rank: int | None = None,
+    cp_kv_cache_interleave_size: int = 1,
 ) -> list[DeepseekV32IndexerPCPRoutedPrefillChunkMetadata]:
     """Build an identical PCP source-row plan on every DCP owner.
 
@@ -172,8 +178,8 @@ def build_pcp_routed_prefill_chunks_from_gathered(
     all owners on exactly the same collective schedule even when DualChunkSwap
     gives them uneven request and token counts.
 
-    Only interleave-one DCP is supported. The metadata builder rejects other
-    layouts before calling this helper.
+    Token-interleaved and page-interleaved DCP use the same route; only the
+    owner-local causal lengths and local-to-global candidate mapping differ.
     """
     if gathered_req_metadata_cpu.device.type != "cpu":
         raise ValueError("PCP route request metadata must be on CPU.")
@@ -190,6 +196,8 @@ def build_pcp_routed_prefill_chunks_from_gathered(
         raise ValueError(
             f"Invalid DCP route rank/world: rank={dcp_rank}, world={dcp_world_size}."
         )
+    if cp_kv_cache_interleave_size <= 0:
+        raise ValueError("PCP route DCP interleave must be positive.")
     expected_rows = dcp_world_size * req_capacity_per_rank
     if gathered_req_metadata_cpu.shape[0] != expected_rows:
         raise ValueError(
@@ -245,7 +253,15 @@ def build_pcp_routed_prefill_chunks_from_gathered(
                     f"rank={source_rank}, token={source_token_idx}."
                 )
             seen_source_rows.add(source_row)
-        max_local_len = _dcp_local_count_interleave_one(seq_len, 0, dcp_world_size)
+        max_local_len = max(
+            _dcp_local_count(
+                seq_len,
+                owner_rank,
+                dcp_world_size,
+                cp_kv_cache_interleave_size,
+            )
+            for owner_rank in range(dcp_world_size)
+        )
         if max_local_len > workspace_size:
             raise RuntimeError(
                 "A PCP-routed sparse-indexer request exceeds the KV gather "
@@ -266,7 +282,15 @@ def build_pcp_routed_prefill_chunks_from_gathered(
         chunk_n = 0
         while req_end < len(requests):
             _, _, _, query_len, seq_len = requests[req_end]
-            max_local_len = _dcp_local_count_interleave_one(seq_len, 0, dcp_world_size)
+            max_local_len = max(
+                _dcp_local_count(
+                    seq_len,
+                    owner_rank,
+                    dcp_world_size,
+                    cp_kv_cache_interleave_size,
+                )
+                for owner_rank in range(dcp_world_size)
+            )
             new_m = chunk_m + query_len
             new_n = chunk_n + max_local_len
             if new_n <= workspace_size and new_m * new_n <= max_logits_elems:
@@ -278,7 +302,15 @@ def build_pcp_routed_prefill_chunks_from_gathered(
 
         if req_end == req_start:
             _, _, _, chunk_m, seq_len = requests[req_end]
-            chunk_n = _dcp_local_count_interleave_one(seq_len, 0, dcp_world_size)
+            chunk_n = max(
+                _dcp_local_count(
+                    seq_len,
+                    owner_rank,
+                    dcp_world_size,
+                    cp_kv_cache_interleave_size,
+                )
+                for owner_rank in range(dcp_world_size)
+            )
             req_end += 1
 
         max_query_rows = (
@@ -300,7 +332,12 @@ def build_pcp_routed_prefill_chunks_from_gathered(
         chunk_block_table = gathered_block_table.index_select(0, gathered_rows)
 
         local_counts = [
-            _dcp_local_count_interleave_one(request[4], dcp_rank, dcp_world_size)
+            _dcp_local_count(
+                request[4],
+                dcp_rank,
+                dcp_world_size,
+                cp_kv_cache_interleave_size,
+            )
             for request in chunk_requests
         ]
         local_cu_seq_lens_cpu = [0]
@@ -312,7 +349,12 @@ def build_pcp_routed_prefill_chunks_from_gathered(
 
         max_local_total_seq_lens = max(
             sum(
-                _dcp_local_count_interleave_one(request[4], owner_rank, dcp_world_size)
+                _dcp_local_count(
+                    request[4],
+                    owner_rank,
+                    dcp_world_size,
+                    cp_kv_cache_interleave_size,
+                )
                 for request in chunk_requests
             )
             for owner_rank in range(dcp_world_size)
@@ -343,8 +385,11 @@ def build_pcp_routed_prefill_chunks_from_gathered(
             row_request_indices, global_causal_lens
         ):
             row_start = local_cu_seq_lens_cpu[request_idx]
-            causal_count = _dcp_local_count_interleave_one(
-                global_causal_len, dcp_rank, dcp_world_size
+            causal_count = _dcp_local_count(
+                global_causal_len,
+                dcp_rank,
+                dcp_world_size,
+                cp_kv_cache_interleave_size,
             )
             cu_seqlen_ks_cpu.append(row_start)
             cu_seqlen_ke_cpu.append(row_start + causal_count)
@@ -376,6 +421,10 @@ def build_pcp_routed_prefill_chunks_from_gathered(
 class DeepseekV32IndexerBackend(AttentionBackend):
     @classmethod
     def supports_pcp(cls) -> bool:
+        return True
+
+    @classmethod
+    def requires_pcp_query_routing(cls) -> bool:
         return True
 
     @staticmethod
@@ -697,6 +746,8 @@ class DeepseekV32IndexerMetadata:
 
     decode: DeepSeekV32IndexerDecodeMetadata | None = None
     prefill: DeepseekV32IndexerPrefillMetadata | None = None
+    pcp_query_routing: PCPQueryRoutingMetadata | None = None
+    pcp_cache_slot_mapping: torch.Tensor | None = None
 
 
 def get_max_prefill_buffer_size(vllm_config: VllmConfig):
@@ -734,31 +785,37 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
         self.pcp_world_size = parallel_config.prefill_context_parallel_size
         self.use_pcp = self.pcp_world_size > 1
         self.cp_kv_cache_interleave_size = parallel_config.cp_kv_cache_interleave_size
-        self.use_pcp_dcp_direct_prefill = (
+        use_owner_history = (
             self.use_pcp and self.dcp_world_size > 1 and envs.VLLM_USE_PCP_OWNER_HISTORY
         )
-        if self.use_pcp_dcp_direct_prefill and (
-            self.cp_kv_cache_interleave_size != self.kv_cache_spec.block_size
-        ):
-            raise NotImplementedError(
-                "Owner-history sparse-indexer prefill requires page-granular "
-                "ownership: cp_kv_cache_interleave_size must equal the indexer "
-                f"block size ({self.kv_cache_spec.block_size})."
+        owner_indexer_prefill_mode = (
+            get_owner_history_indexer_prefill_mode(
+                self.cp_kv_cache_interleave_size,
+                self.kv_cache_spec.block_size,
             )
+            if use_owner_history
+            else None
+        )
+        self.use_pcp_dcp_direct_prefill = (
+            owner_indexer_prefill_mode == "peer_materialize"
+        )
         if (
             self.dcp_world_size > 1
             and self.cp_kv_cache_interleave_size > 1
             and not self.use_pcp_dcp_direct_prefill
+            and not (
+                self.use_pcp
+                and self.cp_kv_cache_interleave_size == self.kv_cache_spec.block_size
+            )
         ):
             raise NotImplementedError(
-                "DCP sparse indexer currently supports only "
-                f"cp_kv_cache_interleave_size=1 (got "
-                f"{self.cp_kv_cache_interleave_size})."
+                "DCP sparse indexer requires cp_kv_cache_interleave_size=1, "
+                "except PCP query routing also supports interleave equal to "
+                f"the KV block size ({self.kv_cache_spec.block_size}); got "
+                f"{self.cp_kv_cache_interleave_size}."
             )
         self.use_pcp_dcp_prefill_route = (
-            self.use_pcp
-            and self.dcp_world_size > 1
-            and not self.use_pcp_dcp_direct_prefill
+            use_owner_history and owner_indexer_prefill_mode == "query_route"
         )
         if self.use_pcp_dcp_prefill_route:
             if self.dcp_world_size != self.pcp_world_size:
@@ -1142,6 +1199,7 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
             workspace_size=self.max_prefill_buffer_size,
             max_logits_bytes=max_logits_bytes,
             source_token_capacity_per_rank=source_stride,
+            cp_kv_cache_interleave_size=self.cp_kv_cache_interleave_size,
         )
 
     def build(

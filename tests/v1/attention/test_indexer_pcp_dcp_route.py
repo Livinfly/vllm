@@ -9,19 +9,115 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
+import vllm.model_executor.layers.attention.pcp as pcp_ops
 import vllm.model_executor.layers.sparse_attn_indexer as sparse_indexer
+import vllm.v1.attention.ops.common as common_ops
 from vllm.model_executor.layers.sparse_attn_indexer import (
     _build_pcp_candidate_a2a_send_buffer,
     _exchange_pcp_candidates_to_origins,
     _pcp_candidate_a2a_selector_input,
 )
 from vllm.utils.network_utils import get_open_port
+from vllm.v1.attention.backend import PCPQueryRoutingMetadata
 from vllm.v1.attention.backends.mla.indexer import (
     DeepseekV32IndexerMetadata,
     DeepseekV32IndexerPrefillChunkMetadata,
     DeepseekV32IndexerPrefillMetadata,
     build_pcp_routed_prefill_chunks_from_gathered,
 )
+from vllm.v1.attention.backends.mla.owner_history import (
+    get_owner_history_indexer_prefill_mode,
+)
+
+
+def test_owner_history_indexer_routes_token_interleaved_history() -> None:
+    assert get_owner_history_indexer_prefill_mode(1, 64) == "query_route"
+    assert get_owner_history_indexer_prefill_mode(64, 64) == "peer_materialize"
+    with pytest.raises(NotImplementedError, match="must be 1 or equal"):
+        get_owner_history_indexer_prefill_mode(16, 64)
+
+
+@pytest.mark.parametrize(
+    ("rank", "local_rows"),
+    [(0, [0, 1, 6]), (1, [2, 3, 4, 5])],
+)
+def test_collective_query_rows_restore_global_order(
+    monkeypatch: pytest.MonkeyPatch,
+    rank: int,
+    local_rows: list[int],
+) -> None:
+    rank_rows = (
+        torch.tensor([[0], [1], [6], [0]]),
+        torch.tensor([[2], [3], [4], [5]]),
+    )
+
+    def all_gather(tensor: torch.Tensor, dim: int) -> torch.Tensor:
+        assert dim == 0
+        torch.testing.assert_close(tensor, rank_rows[rank])
+        return torch.cat(rank_rows, dim=0)
+
+    monkeypatch.setattr(
+        pcp_ops,
+        "get_pcp_group",
+        lambda: SimpleNamespace(all_gather=all_gather),
+    )
+    routing = PCPQueryRoutingMetadata(
+        global_from_gathered=torch.tensor([0, 1, 4, 5, 6, 7, 2]),
+        local_from_global=torch.tensor(local_rows),
+        local_num_tokens=len(local_rows),
+        local_num_tokens_padded=4,
+    )
+
+    global_rows = pcp_ops.gather_pcp_query_rows(
+        torch.tensor(local_rows).view(-1, 1), routing
+    )
+
+    torch.testing.assert_close(global_rows.flatten(), torch.arange(7))
+
+
+@pytest.mark.parametrize(
+    ("rank", "local_rows"),
+    [(0, [0, 1, 6]), (1, [2, 3, 4, 5])],
+)
+def test_collective_attention_restores_local_query_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    rank: int,
+    local_rows: list[int],
+) -> None:
+    gathered_from_global = torch.tensor([0, 1, 6, 0, 2, 3, 4, 5])
+    routing = PCPQueryRoutingMetadata(
+        global_from_gathered=torch.tensor([0, 1, 4, 5, 6, 7, 2]),
+        local_from_global=torch.tensor(local_rows),
+        local_num_tokens=len(local_rows),
+        local_num_tokens_padded=4,
+        gathered_from_global=gathered_from_global,
+    )
+    global_output = torch.arange(7, dtype=torch.float32).view(7, 1, 1)
+    global_lse = torch.arange(7, dtype=torch.float32).view(7, 1)
+
+    def reduce_batch(output, lse, group, **kwargs):
+        assert kwargs["is_lse_base_on_e"]
+        torch.testing.assert_close(
+            output.flatten(), gathered_from_global.to(torch.float32)
+        )
+        torch.testing.assert_close(
+            lse.flatten(), gathered_from_global.to(torch.float32)
+        )
+        return output.view(2, 4, 1, 1)[group.rank_in_group]
+
+    monkeypatch.setattr(common_ops, "cp_lse_ag_out_rs_batch", reduce_batch)
+    group = SimpleNamespace(world_size=2, rank_in_group=rank)
+
+    local_output = common_ops.cp_lse_ag_out_pcp_rs(
+        global_output,
+        global_lse,
+        routing,
+        group,  # type: ignore[arg-type]
+    )
+
+    torch.testing.assert_close(
+        local_output.flatten(), torch.tensor(local_rows, dtype=torch.float32)
+    )
 
 
 def _metadata(
@@ -182,6 +278,40 @@ def test_pcp_dcp_route_handles_mixed_continued_and_zero_token_sources() -> None:
             [max(0, (length + 2) // 4) for length in expected_global_causal_lens],
             dtype=torch.int32,
         ),
+    )
+
+
+def test_pcp_dcp_route_supports_page_interleaved_history() -> None:
+    world = 2
+    capacity = 1
+    metadata = _metadata(
+        world,
+        capacity,
+        [[(0, 2, 130)], [(0, 2, 132)]],
+    )
+    block_table = torch.zeros((world * capacity, 3), dtype=torch.int32)
+
+    rank_counts = []
+    for rank in range(world):
+        chunks = build_pcp_routed_prefill_chunks_from_gathered(
+            metadata,
+            block_table,
+            req_capacity_per_rank=capacity,
+            dcp_rank=rank,
+            dcp_world_size=world,
+            workspace_size=512,
+            max_logits_bytes=1024 * 1024,
+            cp_kv_cache_interleave_size=64,
+        )
+        rank_counts.append(
+            _flatten(chunks, "cu_seqlen_ke") - _flatten(chunks, "cu_seqlen_ks")
+        )
+
+    torch.testing.assert_close(
+        rank_counts[0], torch.tensor([65, 66, 67, 68], dtype=torch.int32)
+    )
+    torch.testing.assert_close(
+        rank_counts[1], torch.tensor([64, 64, 64, 64], dtype=torch.int32)
     )
 
 
@@ -485,7 +615,7 @@ def _pcp_candidate_a2a_nccl_worker(
         RANK=str(rank),
         WORLD_SIZE=str(world_size),
     )
-    torch.cuda.set_device(rank)
+    torch.accelerator.set_device_index(rank)
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     try:
         sparse_indexer.get_dcp_group = lambda: SimpleNamespace(
@@ -552,7 +682,7 @@ def _pcp_candidate_a2a_nccl_worker(
 @pytest.mark.distributed(num_gpus=4)
 def test_pcp_candidate_a2a_real_nccl_pcp4() -> None:
     world_size = 4
-    if torch.cuda.device_count() < world_size:
+    if torch.accelerator.device_count() < world_size:
         pytest.skip("production PCP candidate A2A requires four CUDA GPUs")
     mp.spawn(
         _pcp_candidate_a2a_nccl_worker,

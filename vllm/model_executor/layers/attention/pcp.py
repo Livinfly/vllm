@@ -6,6 +6,45 @@ from vllm.distributed.parallel_state import (
     get_pcp_group,
     get_tp_group,
 )
+from vllm.v1.attention.backend import PCPQueryRoutingMetadata
+
+
+def gather_pcp_query_rows(
+    tensor: torch.Tensor,
+    routing: PCPQueryRoutingMetadata,
+) -> torch.Tensor:
+    """Replicate PCP-local rows and restore them to global query order."""
+    local_tokens = routing.local_num_tokens
+    padded_tokens = routing.local_num_tokens_padded
+    assert tensor.shape[0] >= local_tokens
+    if tensor.shape[0] < padded_tokens:
+        padded = tensor.new_zeros((padded_tokens, *tensor.shape[1:]))
+        padded[:local_tokens].copy_(tensor[:local_tokens])
+    else:
+        padded = tensor[:padded_tokens].contiguous()
+    gathered = get_pcp_group().all_gather(padded, dim=0)
+    return gathered.index_select(0, routing.global_from_gathered)
+
+
+def select_pcp_query_rows(
+    tensor: torch.Tensor,
+    routing: PCPQueryRoutingMetadata,
+) -> torch.Tensor:
+    """Select this PCP rank's unpadded rows from global query order."""
+    return tensor.index_select(0, routing.local_from_global)
+
+
+def get_pcp_local_rows_for_range(
+    routing: PCPQueryRoutingMetadata,
+    start: int,
+    end: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return local row IDs and their offsets inside a global row range."""
+    global_rows = routing.local_from_global
+    local_rows = (
+        ((global_rows >= start) & (global_rows < end)).nonzero(as_tuple=False).flatten()
+    )
+    return local_rows, global_rows.index_select(0, local_rows) - start
 
 
 def _gather_prefill_cache_inputs(

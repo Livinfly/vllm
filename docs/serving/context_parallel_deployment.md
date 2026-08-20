@@ -134,7 +134,7 @@ no asynchronous scheduling. The validated and recommended launch in this
 section uses the SM100 FlashMLA sparse backend with `fp8_ds_mla` KV layout.
 Explicit `materialize` mode fails closed on backends without bounded prefill
 history materialization; the existing FlashInfer owner-compute combination
-remains available in `auto` mode. The path rejects multimodal inputs, LoRA,
+remains available in `auto` mode. The PCP4 path rejects multimodal inputs, LoRA,
 speculative decoding, CUDA graphs, sleep mode, dual-batch/ubatch overlap,
 prefix caching/copy-on-write, and KV connectors or offloading. Cache allocation
 and POSIX file-descriptor exchange happen only during startup; the per-layer
@@ -145,6 +145,37 @@ batches do not.
 
 The ordinary collective PCP path remains the default when
 `VLLM_USE_PCP_OWNER_HISTORY` is unset.
+
+### Experimental DeepSeek-V3.2 PCP2/DCP2 prefix-cache comparison
+
+DeepSeek-V3.2 has a narrow experimental configuration for comparing the
+ordinary all-gather history path with CUDA VMM owner history. Both modes use
+TP1, PCP2=DCP2, 64-token blocks, either token-interleaved or page-interleaved
+DCP ownership, FlashMLA sparse attention, and `fp8_ds_mla` KV cache. The CUDA
+VMM mode supports full-block prefix-cache hits and rejects partial-hit
+copy-on-write.
+
+The benchmark below primes an 80K-token prefix and verifies that the measured
+request reuses all 81,920 prefix tokens while computing only its 256-token
+suffix:
+
+```bash
+for mode in all_gather cuda_vmm; do
+  for interleave in 1 64; do
+    .venv/bin/python \
+      benchmarks/experimental/pcp_dcp_mla_prefix/smoke_sparse_pcp.py \
+      --history-mode "$mode" --interleave-size "$interleave" \
+      --prefix-tokens 81920 --suffix-tokens 256
+  done
+done
+```
+
+With token interleave, the CUDA VMM variant routes sparse-indexer query rows to
+the two cache owners and exchanges top-k candidates rather than KV history.
+With page interleave, the indexer reads the peer-mapped owner pages directly.
+Main KV and Indexer K history remain owner-sharded in both cases. Sparse MLA
+translates the global top-k IDs to the rank-major VMM view and directly reads
+the selected owner rows.
 
 ## Decode Context Parallel
 
